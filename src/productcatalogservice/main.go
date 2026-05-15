@@ -49,9 +49,45 @@ import (
 var (
 	log               *logrus.Logger
 	catalog           []*pb.Product
+	catalogMap        map[string]*pb.Product
 	resource          *sdkresource.Resource
 	initResourcesOnce sync.Once
+	featureFlagCache  = &ffCache{
+		cache: make(map[string]*ffCacheEntry),
+		ttl:   5 * time.Second,
+	}
 )
+
+// Feature flag cache to reduce repeated lookups
+type ffCache struct {
+	sync.RWMutex
+	cache map[string]*ffCacheEntry
+	ttl   time.Duration
+}
+
+type ffCacheEntry struct {
+	value     bool
+	expiresAt time.Time
+}
+
+func (c *ffCache) get(key string) (bool, bool) {
+	c.RLock()
+	defer c.RUnlock()
+	entry, found := c.cache[key]
+	if !found || time.Now().After(entry.expiresAt) {
+		return false, false
+	}
+	return entry.value, true
+}
+
+func (c *ffCache) set(key string, value bool) {
+	c.Lock()
+	defer c.Unlock()
+	c.cache[key] = &ffCacheEntry{
+		value:     value,
+		expiresAt: time.Now().Add(c.ttl),
+	}
+}
 
 func init() {
 	log = logrus.New()
@@ -62,6 +98,13 @@ func init() {
 		log.Fatalf("Reading Product Files: %v", err)
 		os.Exit(1)
 	}
+
+	// Build index for fast lookups
+	catalogMap = make(map[string]*pb.Product, len(catalog))
+	for _, product := range catalog {
+		catalogMap[product.Id] = product
+	}
+	log.Infof("Built product index with %d entries", len(catalogMap))
 }
 
 func initResource() *sdkresource.Resource {
@@ -295,15 +338,10 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		return nil, status.Errorf(codes.Internal, msg)
 	}
 
-	var found *pb.Product
-	for _, product := range catalog {
-		if req.Id == product.Id {
-			found = product
-			break
-		}
-	}
+	// Use map lookup instead of linear search (O(1) vs O(n))
+	found, exists := catalogMap[req.Id]
 
-	if found == nil {
+	if !exists {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
@@ -341,6 +379,16 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 		return false
 	}
 
+	// Check cache first
+	flagName := "productCatalogFailure"
+	if cachedValue, found := featureFlagCache.get(flagName); found {
+		return cachedValue
+	}
+
+	// Cache miss - fetch from feature flag service
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
 	conn, err := createClient(ctx, p.featureFlagSvcAddr)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
@@ -349,7 +397,6 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	}
 	defer conn.Close()
 
-	flagName := "productCatalogFailure"
 	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
 		Name: flagName,
 	})
@@ -358,6 +405,9 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
 		return false
 	}
+
+	// Update cache
+	featureFlagCache.set(flagName, ffResponse.Enabled)
 
 	return ffResponse.Enabled
 }
