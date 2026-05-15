@@ -5,6 +5,7 @@
 
 
 import json
+import logging
 import os
 import random
 import uuid
@@ -25,12 +26,19 @@ from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrument
 from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
 from playwright.async_api import Route, Request
 
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 exporter = OTLPMetricExporter(insecure=True)
 set_meter_provider(MeterProvider([PeriodicExportingMetricReader(exporter)]))
 
 tracer_provider = TracerProvider()
 trace.set_tracer_provider(tracer_provider)
 tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+
+# Get tracer for error reporting
+tracer = trace.get_tracer(__name__)
 
 # Instrumenting manually to avoid error with locust gevent monkey
 Jinja2Instrumentor().instrument()
@@ -150,8 +158,13 @@ if browser_traffic_enabled:
                 await page.goto("/cart", wait_until="domcontentloaded")
                 await page.select_option('[name="currency_code"]', 'CHF')
                 await page.wait_for_timeout(2000)  # giving the browser time to export the traces
-            except:
-                pass
+            except Exception as e:
+                # Log error with details instead of silently ignoring
+                logger.error(f"Error in open_cart_page_and_change_currency: {type(e).__name__}: {str(e)}")
+                with tracer.start_as_current_span("loadgen_error") as span:
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span.record_exception(e)
+                    span.set_attribute("task.name", "open_cart_page_and_change_currency")
 
         @task
         @pw
@@ -164,8 +177,13 @@ if browser_traffic_enabled:
                 await page.click('p:has-text("Roof Binoculars")')
                 await page.click('button:has-text("Add To Cart")')
                 await page.wait_for_timeout(2000)  # giving the browser time to export the traces
-            except:
-                pass
+            except Exception as e:
+                # Log error with details instead of silently ignoring
+                logger.error(f"Error in add_product_to_cart: {type(e).__name__}: {str(e)}")
+                with tracer.start_as_current_span("loadgen_error") as span:
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span.record_exception(e)
+                    span.set_attribute("task.name", "add_product_to_cart")
 
         @task
         @pw
@@ -215,8 +233,14 @@ if browser_traffic_enabled:
                     await page.click('button:has-text("Go to Shopping Cart")')
                     await page.wait_for_timeout(random.randint(2000, 15000))
                     await page.click('button:has-text("Place Order")')
-            except:
-                raise
+            except Exception as e:
+                # Log error with details instead of bare raise
+                logger.error(f"Error in browse_shop: {type(e).__name__}: {str(e)}")
+                with tracer.start_as_current_span("browse_shop_error") as span:
+                    span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                    span.record_exception(e)
+                    span.set_attribute("task.name", "browse_shop")
+                # Don't raise - let Locust handle the failure gracefully
 
 
 async def add_baggage_header(route: Route, request: Request):
