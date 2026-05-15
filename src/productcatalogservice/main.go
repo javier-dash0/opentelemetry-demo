@@ -292,7 +292,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
 		log.WithContext(ctx).WithError(err).Errorln(msg)
-		return nil, status.Errorf(codes.Internal, msg)
+		return nil, status.Errorf(codes.Unavailable, msg)
 	}
 
 	var found *pb.Product
