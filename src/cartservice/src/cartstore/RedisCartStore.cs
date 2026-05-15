@@ -15,6 +15,8 @@ public class RedisCartStore : ICartStore
     private readonly ILogger _logger;
     private const string CartFieldName = "cart";
     private const int RedisRetryNumber = 30;
+    private const int MaxConnectionAttempts = 3;
+    private const int InitialRetryDelayMs = 100;
 
     private volatile ConnectionMultiplexer _redis;
     private volatile bool _isRedisConnectionOpened;
@@ -40,6 +42,9 @@ public class RedisCartStore : ICartStore
         _redisConnectionOptions.ReconnectRetryPolicy = new ExponentialRetry(1000);
 
         _redisConnectionOptions.KeepAlive = 180;
+        _redisConnectionOptions.ConnectTimeout = 5000; // 5 second connection timeout
+        _redisConnectionOptions.SyncTimeout = 5000; // 5 second operation timeout
+        _redisConnectionOptions.AsyncTimeout = 5000;
     }
 
     public ConnectionMultiplexer GetConnection()
@@ -55,7 +60,7 @@ public class RedisCartStore : ICartStore
 
     private void EnsureRedisConnected()
     {
-        if (_isRedisConnectionOpened)
+        if (_isRedisConnectionOpened && _redis != null && _redis.IsConnected)
         {
             return;
         }
@@ -63,43 +68,87 @@ public class RedisCartStore : ICartStore
         // Connection is closed or failed - open a new one but only at the first thread
         lock (_locker)
         {
-            if (_isRedisConnectionOpened)
+            if (_isRedisConnectionOpened && _redis != null && _redis.IsConnected)
             {
                 return;
             }
 
-            _logger.LogDebug("Connecting to Redis: {_connectionString}", _connectionString);
-            _redis = ConnectionMultiplexer.Connect(_redisConnectionOptions);
-
-            if (_redis == null || !_redis.IsConnected)
+            // Implement retry logic with exponential backoff
+            Exception lastException = null;
+            for (int attempt = 1; attempt <= MaxConnectionAttempts; attempt++)
             {
-                _logger.LogError("Wasn't able to connect to redis");
+                try
+                {
+                    _logger.LogDebug("Connecting to Redis (attempt {attempt}/{MaxConnectionAttempts}): {_connectionString}", 
+                        attempt, MaxConnectionAttempts, _connectionString);
+                    
+                    _redis = ConnectionMultiplexer.Connect(_redisConnectionOptions);
 
-                // We weren't able to connect to Redis despite some retries with exponential backoff.
-                throw new ApplicationException("Wasn't able to connect to redis");
+                    if (_redis == null || !_redis.IsConnected)
+                    {
+                        throw new ApplicationException("Connection multiplexer returned null or not connected");
+                    }
+
+                    _logger.LogInformation("Successfully connected to Redis on attempt {attempt}", attempt);
+                    var cache = _redis.GetDatabase();
+
+                    _logger.LogDebug("Performing connection validation test");
+                    cache.StringSet("cart", "OK");
+                    object res = cache.StringGet("cart");
+                    _logger.LogDebug("Connection validation test result: {res}", res);
+
+                    _redis.InternalError += (_, e) => { 
+                        _logger.LogError(e.Exception, "Redis internal error occurred");
+                    };
+                    _redis.ConnectionRestored += (_, _) =>
+                    {
+                        _isRedisConnectionOpened = true;
+                        _logger.LogInformation("Connection to redis was restored successfully.");
+                    };
+                    _redis.ConnectionFailed += (_, e) =>
+                    {
+                        _logger.LogWarning("Connection failed: {FailureType}. Will retry on next operation.", e.FailureType);
+                        _isRedisConnectionOpened = false;
+                    };
+
+                    _isRedisConnectionOpened = true;
+                    return; // Successfully connected
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    _logger.LogWarning(ex, "Failed to connect to Redis on attempt {attempt}/{MaxConnectionAttempts}", 
+                        attempt, MaxConnectionAttempts);
+                    
+                    _isRedisConnectionOpened = false;
+                    
+                    // Dispose failed connection attempt
+                    if (_redis != null)
+                    {
+                        try
+                        {
+                            _redis.Dispose();
+                        }
+                        catch (Exception disposeEx)
+                        {
+                            _logger.LogDebug(disposeEx, "Error disposing failed connection");
+                        }
+                        _redis = null;
+                    }
+                    
+                    // Don't wait after the last attempt
+                    if (attempt < MaxConnectionAttempts)
+                    {
+                        int delayMs = InitialRetryDelayMs * (int)Math.Pow(2, attempt - 1);
+                        _logger.LogDebug("Waiting {delayMs}ms before retry", delayMs);
+                        Task.Delay(delayMs).Wait();
+                    }
+                }
             }
 
-            _logger.LogInformation("Successfully connected to Redis");
-            var cache = _redis.GetDatabase();
-
-            _logger.LogDebug("Performing small test");
-            cache.StringSet("cart", "OK" );
-            object res = cache.StringGet("cart");
-            _logger.LogDebug("Small test result: {res}", res);
-
-            _redis.InternalError += (_, e) => { Console.WriteLine(e.Exception); };
-            _redis.ConnectionRestored += (_, _) =>
-            {
-                _isRedisConnectionOpened = true;
-                _logger.LogInformation("Connection to redis was restored successfully.");
-            };
-            _redis.ConnectionFailed += (_, _) =>
-            {
-                _logger.LogInformation("Connection failed. Disposing the object");
-                _isRedisConnectionOpened = false;
-            };
-
-            _isRedisConnectionOpened = true;
+            // All connection attempts failed
+            _logger.LogError(lastException, "Failed to connect to Redis after {MaxConnectionAttempts} attempts", MaxConnectionAttempts);
+            throw new ApplicationException($"Wasn't able to connect to redis after {MaxConnectionAttempts} attempts", lastException);
         }
     }
 
