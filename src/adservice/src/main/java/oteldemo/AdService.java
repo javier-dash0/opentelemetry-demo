@@ -28,6 +28,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -44,6 +45,7 @@ public final class AdService {
 
   @SuppressWarnings("FieldCanBeLocal")
   private static final int MAX_ADS_TO_SERVE = 2;
+  private static final long FEATURE_FLAG_TIMEOUT_SECONDS = 2;
 
   private Server server;
   private HealthStatusManager healthMgr;
@@ -79,7 +81,12 @@ public final class AdService {
     if (!featureFlagServiceAddr.isEmpty()) {
       featureFlagServiceStub =
           oteldemo.FeatureFlagServiceGrpc.newBlockingStub(
-              ManagedChannelBuilder.forTarget(featureFlagServiceAddr).usePlaintext().build());
+                  ManagedChannelBuilder.forTarget(featureFlagServiceAddr)
+                      .usePlaintext()
+                      .keepAliveTime(30, TimeUnit.SECONDS)
+                      .keepAliveTimeout(5, TimeUnit.SECONDS)
+                      .build())
+              .withDeadlineAfter(FEATURE_FLAG_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     server =
@@ -202,12 +209,21 @@ public final class AdService {
         return false;
       }
 
-      EvaluateProbabilityFeatureFlagResponse response =
-          featureFlagServiceStub.evaluateProbabilityFeatureFlag(
-              EvaluateProbabilityFeatureFlagRequest.newBuilder()
-                  .setName(ADSERVICE_FAIL_FEATURE_FLAG)
-                  .build());
-      return response.getEnabled();
+      try {
+        EvaluateProbabilityFeatureFlagResponse response =
+            featureFlagServiceStub.evaluateProbabilityFeatureFlag(
+                EvaluateProbabilityFeatureFlagRequest.newBuilder()
+                    .setName(ADSERVICE_FAIL_FEATURE_FLAG)
+                    .build());
+        return response.getEnabled();
+      } catch (StatusRuntimeException e) {
+        // If feature flag service is unavailable or times out, default to not failing
+        logger.warn(
+            "Failed to check feature flag '{}', defaulting to false. Error: {}",
+            ADSERVICE_FAIL_FEATURE_FLAG,
+            e.getMessage());
+        return false;
+      }
     }
   }
 
