@@ -19,6 +19,7 @@ from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
+from opentelemetry.semconv.trace import SpanAttributes
 
 # Local
 import logging
@@ -80,6 +81,11 @@ def get_product_list(request_product_ids):
                 first_run = False
                 span.set_attribute("app.cache_hit", False)
                 logger.info("get_product_list: cache miss")
+                # Add RPC semantic attributes for the product catalog call
+                span.set_attribute(SpanAttributes.RPC_SYSTEM, "grpc")
+                span.set_attribute(SpanAttributes.RPC_SERVICE, "oteldemo.ProductCatalogService")
+                span.set_attribute(SpanAttributes.RPC_METHOD, "ListProducts")
+                span.set_attribute(SpanAttributes.PEER_SERVICE, "productcatalogservice")
                 cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
                 response_ids = [x.id for x in cat_response.products]
                 cached_ids = cached_ids + response_ids
@@ -92,6 +98,11 @@ def get_product_list(request_product_ids):
         else:
             logger.debug("get_product_list: recommendationCache feature flag is not enabled")
             span.set_attribute("app.recommendation.cache_enabled", False)
+            # Add RPC semantic attributes for the product catalog call
+            span.set_attribute(SpanAttributes.RPC_SYSTEM, "grpc")
+            span.set_attribute(SpanAttributes.RPC_SERVICE, "oteldemo.ProductCatalogService")
+            span.set_attribute(SpanAttributes.RPC_METHOD, "ListProducts")
+            span.set_attribute(SpanAttributes.PEER_SERVICE, "productcatalogservice")
             cat_response = product_catalog_stub.ListProducts(demo_pb2.Empty())
             product_ids = [x.id for x in cat_response.products]
 
@@ -124,6 +135,12 @@ def must_map_env(key: str):
 def check_feature_flag(flag_name: str):
     if feature_flag_stub is None:
         return False
+    # Add RPC semantic attributes for the feature flag call
+    span = trace.get_current_span()
+    span.set_attribute(SpanAttributes.RPC_SYSTEM, "grpc")
+    span.set_attribute(SpanAttributes.RPC_SERVICE, "oteldemo.FeatureFlagService")
+    span.set_attribute(SpanAttributes.RPC_METHOD, "EvaluateProbabilityFeatureFlag")
+    span.set_attribute(SpanAttributes.PEER_SERVICE, "featureflagservice")
     return feature_flag_stub.EvaluateProbabilityFeatureFlag(demo_pb2.EvaluateProbabilityFeatureFlagRequest(name=flag_name)).enabled
 
 
