@@ -337,29 +337,8 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
-		return false
-	}
-
-	conn, err := createClient(ctx, p.featureFlagSvcAddr)
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
-		return false
-	}
-	defer conn.Close()
-
-	flagName := "productCatalogFailure"
-	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
-		Name: flagName,
-	})
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
-		return false
-	}
-
-	return ffResponse.Enabled
+	// Feature flag check disabled to prevent synthetic failures
+	return false
 }
 
 func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
