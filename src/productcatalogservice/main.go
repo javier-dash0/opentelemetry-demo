@@ -291,7 +291,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).WithError(err).Errorln(msg)
+		log.WithContext(ctx).WithError(err).Warnln(msg)
 		return nil, status.Errorf(codes.Internal, msg)
 	}
 
