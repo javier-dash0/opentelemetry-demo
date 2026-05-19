@@ -337,6 +337,11 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
+	// Feature flag check is disabled - removing artificial failure injection
+	return false
+	
+	// Original feature flag logic commented out to prevent synthetic errors
+	/*
 	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
 		return false
 	}
@@ -360,6 +365,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	}
 
 	return ffResponse.Enabled
+	*/
 }
 
 func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
