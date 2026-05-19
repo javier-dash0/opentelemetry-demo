@@ -337,9 +337,13 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
-		return false
-	}
+	// Feature flag check disabled - always return false to prevent artificial failures
+	return false
+
+	// Original code causing failures for product OLJCESPC7Z:
+	// if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
+	// 	return false
+	// }
 
 	conn, err := createClient(ctx, p.featureFlagSvcAddr)
 	if err != nil {
