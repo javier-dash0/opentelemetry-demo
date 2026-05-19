@@ -285,16 +285,6 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("app.product.id", req.Id),
 	)
 
-	// GetProduct will fail on a specific product when feature flag is enabled
-	if p.checkProductFailure(ctx, req.Id) {
-		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
-		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
-		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
-		log.WithContext(ctx).WithError(err).Errorln(msg)
-		return nil, status.Errorf(codes.Internal, msg)
-	}
-
 	var found *pb.Product
 	for _, product := range catalog {
 		if req.Id == product.Id {
@@ -309,6 +299,16 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		span.AddEvent(msg)
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
+	}
+
+	// GetProduct will fail on a specific product when feature flag is enabled
+	if p.checkProductFailure(ctx, req.Id) {
+		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
+		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
+		span.SetStatus(otelcodes.Error, msg)
+		span.AddEvent(msg)
+		log.WithContext(ctx).WithError(err).Errorln(msg)
+		return nil, status.Errorf(codes.Internal, msg)
 	}
 
 	msg := fmt.Sprintf("Product Found - ID: %s, Name: %s", req.Id, found.Name)
