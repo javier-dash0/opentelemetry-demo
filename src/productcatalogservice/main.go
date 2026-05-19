@@ -307,7 +307,9 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).Error("Product Not Found")
+		log.WithContext(ctx).WithFields(logrus.Fields{
+			"product.id": req.Id,
+		}).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
