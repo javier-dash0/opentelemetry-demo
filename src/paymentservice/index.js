@@ -52,7 +52,7 @@ async function simulateSlowness(span) {
       })
       if (simulateSlownessResponse.enabled) {
         const minimumDelayResponse = simulateSlownessResponse.lowerBound || 0
-        const maximumDelayResponse = simulateSlownessResponse.upperBound || 500
+        const maximumDelayResponse = Math.min(simulateSlownessResponse.upperBound || 500, 100)
         const delayMillis =
             minimumDelayResponse +
             Math.floor(Math.random() * (maximumDelayResponse - minimumDelayResponse))
