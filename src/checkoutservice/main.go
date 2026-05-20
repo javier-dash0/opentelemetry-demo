@@ -266,22 +266,55 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 		total = money.Must(money.Sum(total, multPrice))
 	}
 
-	txID, err := cs.chargeCard(ctx, total, req.CreditCard)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
+	// Run payment charge, shipping, and cart emptying in parallel
+	type result struct {
+		txID               string
+		shippingTrackingID string
+		err                error
 	}
+	
+	paymentCh := make(chan result, 1)
+	shippingCh := make(chan result, 1)
+	cartCh := make(chan error, 1)
+	
+	// Charge card in parallel
+	go func() {
+		txID, err := cs.chargeCard(ctx, total, req.CreditCard)
+		paymentCh <- result{txID: txID, err: err}
+	}()
+	
+	// Ship order in parallel
+	go func() {
+		trackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
+		shippingCh <- result{shippingTrackingID: trackingID, err: err}
+	}()
+	
+	// Empty cart in parallel
+	go func() {
+		cartCh <- cs.emptyUserCart(ctx, req.UserId)
+	}()
+	
+	// Wait for payment to complete
+	paymentResult := <-paymentCh
+	if paymentResult.err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", paymentResult.err)
+	}
+	txID := paymentResult.txID
 	log.Infof("payment went through (transaction_id: %s)", txID)
 	span.AddEvent("charged",
 		trace.WithAttributes(attribute.String("app.payment.transaction.id", txID)))
-
-	shippingTrackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
-	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", err)
+	
+	// Wait for shipping to complete
+	shippingResult := <-shippingCh
+	if shippingResult.err != nil {
+		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", shippingResult.err)
 	}
+	shippingTrackingID := shippingResult.shippingTrackingID
 	shippingTrackingAttribute := attribute.String("app.shipping.tracking.id", shippingTrackingID)
 	span.AddEvent("shipped", trace.WithAttributes(shippingTrackingAttribute))
-
-	_ = cs.emptyUserCart(ctx, req.UserId)
+	
+	// Wait for cart emptying (ignore errors)
+	_ = <-cartCh
 
 	orderResult := &pb.OrderResult{
 		OrderId:            orderID.String(),
