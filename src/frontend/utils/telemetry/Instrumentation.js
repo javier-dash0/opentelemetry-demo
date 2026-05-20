@@ -11,6 +11,7 @@ const {awsEc2Detector, awsEksDetector} = require('@opentelemetry/resource-detect
 const {containerDetector} = require('@opentelemetry/resource-detector-container');
 const {gcpDetector} = require('@opentelemetry/resource-detector-gcp');
 const {envDetector, hostDetector, osDetector, processDetector} = require('@opentelemetry/resources');
+const {SpanKind} = require('@opentelemetry/api');
 
 const sdk = new opentelemetry.NodeSDK({
   traceExporter: new OTLPTraceExporter(),
@@ -19,6 +20,10 @@ const sdk = new opentelemetry.NodeSDK({
       // only instrument fs if it is part of another trace
       '@opentelemetry/instrumentation-fs': {
         requireParentSpan: true,
+      },
+      // Fix gRPC client span kind to be CLIENT instead of PRODUCER
+      '@opentelemetry/instrumentation-grpc': {
+        enabled: true,
       },
     })
   ],
