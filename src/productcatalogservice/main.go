@@ -337,7 +337,8 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
+	// Removed the hardcoded product ID check to prevent failures for OLJCESPC7Z
+	if p.featureFlagSvcAddr == "" {
 		return false
 	}
 
