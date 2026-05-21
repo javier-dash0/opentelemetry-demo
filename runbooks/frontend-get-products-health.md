@@ -29,7 +29,8 @@ Load Generator → Frontend Proxy (Envoy) → Frontend Service → Product Catal
 ## Dashboard
 
 **Name**: Frontend - GET /api/products/2ZYFJ3GM2N  
-**Location**: Dash0 → Dashboards → `frontend-get-products-2zyfj3gm2n`
+**Dashboard ID**: `eb08c506-6a11-4638-b9ae-ff4faf9a0454`  
+**Direct Link**: https://app.dash0-dev.com/datasets/default/dashboards/eb08c506-6a11-4638-b9ae-ff4faf9a0454
 
 ### Panels
 
@@ -60,7 +61,8 @@ histogram_quantile(0.95, sum by() (rate({otel_metric_name = "dash0.spans.duratio
 
 ## Alert Configuration
 
-**Alert Name**: Frontend GET /api/products/2ZYFJ3GM2N - High Latency
+**Alert Name**: Frontend GET /api/products/2ZYFJ3GM2N - High Latency  
+**Note**: Deploy the alert JSON to Dash0 to activate monitoring. Once deployed, the check rule ID will appear here.
 
 ### Expression
 ```promql
@@ -94,7 +96,7 @@ histogram_quantile(0.95, sum by() (rate({otel_metric_name = "dash0.spans.duratio
 
 **Immediate Actions:**
 
-1. **Check Dashboard** - Open the dashboard to confirm elevated latency across all percentiles
+1. **Check Dashboard** - [Open the dashboard](https://app.dash0-dev.com/datasets/default/dashboards/eb08c506-6a11-4638-b9ae-ff4faf9a0454) to confirm elevated latency across all percentiles
 2. **Verify Traffic Pattern** - Check if request rate has increased significantly
 3. **Review HTTP Status Codes** - Confirm most requests still return 200
 4. **Check Downstream Dependencies** - Investigate Product Catalog Service health
@@ -309,8 +311,8 @@ otel.span.name = "grpc.oteldemo.ProductCatalogService/GetProduct"
 ## References
 
 - [OpenTelemetry Demo Repository](https://github.com/open-telemetry/opentelemetry-demo)
-- Dash0 Dashboard: `frontend-get-products-2zyfj3gm2n`
-- Alert Rule: `Frontend GET /api/products/2ZYFJ3GM2N - High Latency`
+- [Dash0 Dashboard](https://app.dash0-dev.com/datasets/default/dashboards/eb08c506-6a11-4638-b9ae-ff4faf9a0454) - Frontend GET /api/products/2ZYFJ3GM2N
+- Alert Rule: `Frontend GET /api/products/2ZYFJ3GM2N - High Latency` (deploy CheckRule JSON to activate)
 
 ## Revision History
 
