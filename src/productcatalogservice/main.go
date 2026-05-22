@@ -177,6 +177,17 @@ func main() {
 	mustMapEnv(&port, "PRODUCT_CATALOG_SERVICE_PORT")
 	svc.featureFlagSvcAddr = os.Getenv("FEATURE_FLAG_GRPC_SERVICE_ADDR")
 
+	// Initialize persistent connection to Feature Flag service if configured
+	if svc.featureFlagSvcAddr != "" {
+		conn, err := createClient(ctx, svc.featureFlagSvcAddr)
+		if err != nil {
+			log.Warnf("Failed to connect to Feature Flag service: %v", err)
+		} else {
+			svc.featureFlagConn = conn
+			log.Infof("Connected to Feature Flag service at %s", svc.featureFlagSvcAddr)
+		}
+	}
+
 	log.Infof("ProductCatalogService gRPC server started on port: %s", port)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
@@ -204,12 +215,20 @@ func main() {
 
 	<-ctx.Done()
 
+	// Close Feature Flag connection if it exists
+	if svc.featureFlagConn != nil {
+		svc.featureFlagConn.Close()
+		log.WithContext(ctx).Println("Closed Feature Flag service connection")
+	}
+
 	srv.GracefulStop()
 	log.WithContext(ctx).Println("ProductCatalogService gRPC server stopped")
 }
 
 type productCatalog struct {
 	featureFlagSvcAddr string
+	featureFlagConn    *grpc.ClientConn
+	featureFlagConnMu  sync.RWMutex
 	pb.UnimplementedProductCatalogServiceServer
 }
 
@@ -341,13 +360,16 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 		return false
 	}
 
-	conn, err := createClient(ctx, p.featureFlagSvcAddr)
-	if err != nil {
+	// Use persistent connection with read lock
+	p.featureFlagConnMu.RLock()
+	conn := p.featureFlagConn
+	p.featureFlagConnMu.RUnlock()
+
+	if conn == nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Not Available")))
 		return false
 	}
-	defer conn.Close()
 
 	flagName := "productCatalogFailure"
 	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
