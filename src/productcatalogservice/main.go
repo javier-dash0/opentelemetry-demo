@@ -337,6 +337,12 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
+	// Feature flag check disabled - remove hardcoded failure injection for product OLJCESPC7Z
+	// This was causing 1.72% error rate in production
+	// To re-enable chaos engineering, uncomment the code below and ensure feature flag service is configured
+	return false
+
+	/*
 	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
 		return false
 	}
@@ -360,6 +366,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	}
 
 	return ffResponse.Enabled
+	*/
 }
 
 func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
