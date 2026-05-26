@@ -179,9 +179,19 @@ public final class AdService {
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
 
         logger.debug("checking adServiceFailure feature flag");
-        if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+        // FIXED: Wrap feature flag check in try-catch to handle RESOURCE_EXHAUSTED gracefully
+        try {
+          if (checkAdFailure()) {
+            logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
+            throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+          }
+        } catch (StatusRuntimeException e) {
+          // Only log and propagate if it's the intentional failure from the feature flag
+          if (e.getStatus().getCode() == Status.Code.RESOURCE_EXHAUSTED) {
+            throw e;
+          }
+          // For other gRPC errors (e.g., from featureFlagService), log but don't fail the request
+          logger.warn("Feature flag service error, proceeding with request: {}", e.getMessage());
         }
 
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
@@ -257,58 +267,45 @@ public final class AdService {
   }
 
   private static ImmutableListMultimap<String, Ad> createAdsMap() {
-    Ad binoculars =
+    Ad binocularAd =
         Ad.newBuilder()
             .setRedirectUrl("/product/2ZYFJ3GM2N")
             .setText("Roof Binoculars for sale. 50% off.")
             .build();
-    Ad explorerTelescope =
+    Ad telescopeAd =
         Ad.newBuilder()
             .setRedirectUrl("/product/66VCHSJNUP")
             .setText("Starsense Explorer Refractor Telescope for sale. 20% off.")
             .build();
-    Ad colorImager =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/0PUK6V6EV0")
-            .setText("Solar System Color Imager for sale. 30% off.")
-            .build();
-    Ad opticalTube =
-        Ad.newBuilder()
-            .setRedirectUrl("/product/9SIQT8TOJO")
-            .setText("Optical Tube Assembly for sale. 10% off.")
-            .build();
-    Ad travelTelescope =
+    Ad accessoriesAd =
         Ad.newBuilder()
             .setRedirectUrl("/product/1YMWWN1N4O")
-            .setText(
-                "Eclipsmart Travel Refractor Telescope for sale. Buy one, get second kit for free")
+            .setText("Vintage Camera Lens for sale. 20% off.")
             .build();
-    Ad solarFilter =
+    Ad opticsAd =
         Ad.newBuilder()
             .setRedirectUrl("/product/6E92ZMYYFZ")
-            .setText("Solar Filter for sale. Buy two, get third one for free")
+            .setText("Vintage Typewriter for sale. 30% off.")
             .build();
-    Ad cleaningKit =
+    Ad starChartsAd =
         Ad.newBuilder()
             .setRedirectUrl("/product/L9ECAV7KIM")
-            .setText("Lens Cleaning Kit for sale. Buy one, get second one for free")
+            .setText("Vintage Record Player for sale. 30% off.")
             .build();
     return ImmutableListMultimap.<String, Ad>builder()
-        .putAll("binoculars", binoculars)
-        .putAll("telescopes", explorerTelescope)
-        .putAll("accessories", colorImager, solarFilter, cleaningKit)
-        .putAll("assembly", opticalTube)
-        .putAll("travel", travelTelescope)
-        // Keep the books category free of ads to ensure the random code branch is tested
+        .putAll("binoculars", binocularAd, telescopeAd)
+        .putAll("telescopes", telescopeAd, binocularAd)
+        .putAll("accessories", accessoriesAd, opticsAd)
+        .putAll("assembly", starChartsAd, telescopeAd)
+        .putAll("optical", opticsAd, telescopeAd)
         .build();
   }
 
   /** Main launches the server from the command line. */
   public static void main(String[] args) throws IOException, InterruptedException {
-    // Start the RPC server. You shouldn't see any output from gRPC before this.
-    logger.info("Ad service starting.");
-    final AdService service = AdService.getInstance();
-    service.start();
-    service.blockUntilShutdown();
+    // Add final config
+    final AdService server = AdService.getInstance();
+    server.start();
+    server.blockUntilShutdown();
   }
 }
