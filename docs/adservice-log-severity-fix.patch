@@ -1,0 +1,20 @@
+--- AdService.java.orig	2026-05-26 10:23:07.448007013 +0000
++++ opentelemetry-demo/src/adservice/src/main/java/oteldemo/AdService.java	2026-05-26 10:23:16.241062616 +0000
+@@ -180,7 +180,7 @@
+ 
+         logger.debug("checking adServiceFailure feature flag");
+         if (checkAdFailure()) {
+-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
++          logger.error(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
+           throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+         }
+ 
+@@ -192,7 +192,7 @@
+         span.addEvent(
+             "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
+         span.setStatus(StatusCode.ERROR);
+-        logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
++        logger.log(Level.ERROR, "GetAds Failed with status {}", e.getStatus());
+         responseObserver.onError(e);
+       }
+     }

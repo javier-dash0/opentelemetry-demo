@@ -1,0 +1,22 @@
+{
+  "name": "AdService Feature Flag Failures",
+  "expression": "(sum(rate({otel_metric_name=\"dash0.spans\",service_name=\"adservice\",service_namespace=\"opentelemetry-demo\",otel_status=\"ERROR\"}[5m])) / sum(rate({otel_metric_name=\"dash0.spans\",service_name=\"adservice\",service_namespace=\"opentelemetry-demo\"}[5m]))) * 100 > $__threshold",
+  "thresholds": {
+    "degraded": 20
+  },
+  "interval": "1m",
+  "for": "5m",
+  "keepFiringFor": "0s",
+  "summary": "AdService error rate exceeds 20% for 5 minutes",
+  "description": "The adservice is experiencing an elevated error rate likely due to the adServiceFailure feature flag. This flag causes approximately 30% of requests to fail with RESOURCE_EXHAUSTED gRPC errors (status code 8). The service logs warnings when failures occur with messages like 'adServiceFailure fail feature flag enabled, failing request' followed by 'GetAds Failed with status Status{code=RESOURCE_EXHAUSTED, description=null, cause=null}'.",
+  "labels": {
+    "service": "adservice",
+    "namespace": "opentelemetry-demo",
+    "severity": "warning",
+    "feature_flag": "adServiceFailure"
+  },
+  "annotations": {
+    "runbook_url": "https://github.com/open-telemetry/opentelemetry-demo/blob/main/docs/feature_flags.md",
+    "impact": "Users may experience failed ad requests affecting revenue and user experience"
+  }
+}
