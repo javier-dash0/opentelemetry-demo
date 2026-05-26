@@ -180,7 +180,7 @@ public final class AdService {
 
         logger.debug("checking adServiceFailure feature flag");
         if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
+          logger.error(ADSERVICE_FAIL_FEATURE_FLAG + " feature flag enabled - intentionally failing request");
           throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
         }
 

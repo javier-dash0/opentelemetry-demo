@@ -1,0 +1,22 @@
+{
+  "name": "AdService Feature Flag Failure Alert",
+  "expression": "sum (rate({otel_metric_name = \"dash0.spans\", service_name = \"adservice\", service_namespace = \"opentelemetry-demo\"}[5m])) > $__threshold",
+  "thresholds": {
+    "failed": 5
+  },
+  "summary": "AdService request rate is elevated",
+  "description": "The adservice request rate is higher than normal, indicating potential feature flag activity or increased traffic. Monitor for associated errors if the adServiceFailure feature flag is enabled.",
+  "interval": "1m",
+  "for": "2m",
+  "keepFiringFor": "0s",
+  "modes": [
+    "request"
+  ],
+  "labels": {
+    "service": "adservice",
+    "namespace": "opentelemetry-demo"
+  },
+  "annotations": {
+    "runbook": "https://github.com/javier-dash0/opentelemetry-demo/blob/main/docs/runbooks/adservice-feature-flag-failures.md"
+  }
+}
