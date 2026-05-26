@@ -1,0 +1,110 @@
+kind: Dashboard
+metadata:
+  name: adservice-feature-flag-monitoring
+  project: opentelemetry-demo
+spec:
+  display:
+    name: AdService Feature Flag Monitoring
+    description: Monitors the adservice feature flag failure issue - tracking ~30% error rate from adServiceFailure feature flag
+  duration: 1h
+  panels:
+    error-count:
+      kind: Panel
+      spec:
+        display:
+          name: Error Spans
+        plugin:
+          kind: TimeSeriesChart
+          spec: {}
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: |
+                    sum (increase({otel_metric_name = "dash0.spans", service_name = "adservice", service_namespace = "opentelemetry-demo", otel_status = "ERROR"}[$__interval]))
+    throughput:
+      kind: Panel
+      spec:
+        display:
+          name: Request Throughput
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            yAxis:
+              format:
+                unit: requests/sec
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: |
+                    sum (increase({otel_metric_name = "dash0.spans", service_name = "adservice", service_namespace = "opentelemetry-demo"}[$__interval]))
+    p95-latency:
+      kind: Panel
+      spec:
+        display:
+          name: P95 Latency
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            yAxis:
+              format:
+                unit: seconds
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: |
+                    histogram_quantile(0.95, sum by() (rate({otel_metric_name = "dash0.spans.duration", service_name = "adservice", service_namespace = "opentelemetry-demo"}[$__interval])))
+    log-volume:
+      kind: Panel
+      spec:
+        display:
+          name: Log Volume by Severity
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              showLegend: true
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: |
+                    sum by (log_level) (increase({otel_metric_name = "dash0.logs", service_name = "adservice", service_namespace = "opentelemetry-demo"}[$__interval]))
+  layouts:
+    - kind: Grid
+      spec:
+        items:
+          - x: 0
+            y: 0
+            width: 12
+            height: 6
+            content:
+              $ref: "#/spec/panels/error-count"
+          - x: 12
+            y: 0
+            width: 12
+            height: 6
+            content:
+              $ref: "#/spec/panels/throughput"
+          - x: 0
+            y: 6
+            width: 12
+            height: 6
+            content:
+              $ref: "#/spec/panels/p95-latency"
+          - x: 12
+            y: 6
+            width: 12
+            height: 6
+            content:
+              $ref: "#/spec/panels/log-volume"

@@ -180,7 +180,7 @@ public final class AdService {
 
         logger.debug("checking adServiceFailure feature flag");
         if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
+          logger.error(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
           throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
         }
 
@@ -192,7 +192,7 @@ public final class AdService {
         span.addEvent(
             "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
         span.setStatus(StatusCode.ERROR);
-        logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
+        logger.log(Level.ERROR, "GetAds Failed with status {}", e.getStatus());
         responseObserver.onError(e);
       }
     }
