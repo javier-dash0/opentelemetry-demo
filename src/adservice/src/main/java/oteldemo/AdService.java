@@ -181,7 +181,9 @@ public final class AdService {
         logger.debug("checking adServiceFailure feature flag");
         if (checkAdFailure()) {
           logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+          // Fixed: Changed from RESOURCE_EXHAUSTED to INTERNAL to better represent the error type
+          // RESOURCE_EXHAUSTED should be used for rate limiting/quota scenarios, not feature flag failures
+          throw new StatusRuntimeException(Status.INTERNAL.withDescription("Ad service failure feature flag is enabled"));
         }
 
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
