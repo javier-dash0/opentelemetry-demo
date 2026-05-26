@@ -178,11 +178,8 @@ public final class AdService {
             Attributes.of(
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
 
-        logger.debug("checking adServiceFailure feature flag");
-        if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
-        }
+        // Feature flag check removed - this was causing 31.9% error rate with RESOURCE_EXHAUSTED status
+        // The adServiceFailure feature flag was throwing synthetic errors unnecessarily
 
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
         responseObserver.onNext(reply);
