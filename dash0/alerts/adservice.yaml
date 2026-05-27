@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: adservice
+  namespace: opentelemetry-demo
+  labels:
+    prometheus: dash0
+    role: alert-rules
+spec:
+  groups:
+    - name: adservice
+      interval: 1m
+      rules:
+        - alert: adservice GetAds RESOURCE_EXHAUSTED Error Rate
+          expr: |
+            histogram_count(sum by (dash0_dataset) (rate({otel_metric_name="dash0.spans.red", otel_span_status_code="ERROR", service_name="adservice", service_namespace="opentelemetry-demo", dash0_operation_name="oteldemo.AdService GetAds"}[5m])))
+            / (histogram_count(sum by (dash0_dataset) (rate({otel_metric_name="dash0.spans.red", service_name="adservice", service_namespace="opentelemetry-demo", dash0_operation_name="oteldemo.AdService GetAds"}[5m]))) > 0)
+            OR on() vector(0) > $__threshold
+          for: 2m
+          annotations:
+            summary: "adservice GetAds error rate is elevated (RESOURCE_EXHAUSTED)"
+            description: >
+              The oteldemo.AdService/GetAds operation error rate has exceeded the threshold.
+              Errors surface as gRPC RESOURCE_EXHAUSTED (status code 8) and are caused by the
+              adServiceFailure feature flag in the FeatureFlagService.
+              Current value: {{ $value }}
+            runbook: "https://runbooks.example.com/adservice-resource-exhausted"
+            dash0-threshold-degraded: "0.2"
+            dash0-threshold-critical: "0.3"
+          labels:
+            service: adservice
+            namespace: opentelemetry-demo
+            team: ads
