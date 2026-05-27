@@ -10,3 +10,7 @@
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 
+-- Disable productCatalogFailure to restore normal GetProduct behavior.
+-- This flag was found enabled in production causing all GetProduct requests
+-- for product OLJCESPC7Z to fail with INTERNAL error (high error rate alert).
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
