@@ -10,3 +10,7 @@
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 
+-- Disable productCatalogFailure flag — this flag was inadvertently left enabled,
+-- causing ~1.2% of GetProduct requests for product OLJCESPC7Z to return gRPC
+-- INTERNAL errors ("Product Id Lookup Failed"). Resetting to 0 (always disabled).
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
