@@ -66,12 +66,26 @@ func init() {
 
 func initResource() *sdkresource.Resource {
 	initResourcesOnce.Do(func() {
-		extraResources, _ := sdkresource.New(
-			context.Background(),
+		// vcs.repository.url.full links every span back to the source repository,
+		// enabling Dash0 and other observability tools to surface the code context.
+		repoURL := os.Getenv("VCS_REPOSITORY_URL_FULL")
+		extraAttrs := []sdkresource.Option{
 			sdkresource.WithOS(),
 			sdkresource.WithProcess(),
 			sdkresource.WithContainer(),
 			sdkresource.WithHost(),
+		}
+		if repoURL != "" {
+			// vcs.repository.url.full is a stable OTel semantic convention key
+			// (semconv v1.25+). Using attribute.String directly avoids adding
+			// an explicit semconv import while the module still pins an older version.
+			extraAttrs = append(extraAttrs, sdkresource.WithAttributes(
+				attribute.String("vcs.repository.url.full", repoURL),
+			))
+		}
+		extraResources, _ := sdkresource.New(
+			context.Background(),
+			extraAttrs...,
 		)
 		resource, _ = sdkresource.Merge(
 			sdkresource.Default(),
@@ -276,6 +290,11 @@ func (p *productCatalog) ListProducts(ctx context.Context, req *pb.Empty) (*pb.L
 	span.SetAttributes(
 		attribute.Int("app.products.count", len(catalog)),
 	)
+	// Record a span event so the successful response is visible in trace timelines
+	// without needing to inspect attributes separately.
+	span.AddEvent("Listed products", trace.WithAttributes(
+		attribute.Int("app.products.count", len(catalog)),
+	))
 	return &pb.ListProductsResponse{Products: catalog}, nil
 }
 
@@ -290,7 +309,11 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		// Use the OTel semantic exception event so tools can surface exception.type
+		// and exception.message without custom parsing.
+		span.RecordError(err, trace.WithAttributes(
+			attribute.String("app.product.id", req.Id),
+		))
 		log.WithContext(ctx).WithError(err).Errorln(msg)
 		return nil, status.Errorf(codes.Internal, msg)
 	}
@@ -305,23 +328,35 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	if found == nil {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
+		notFoundErr := fmt.Errorf("product not found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		// Use RecordError to emit a structured exception event (exception.type,
+		// exception.message) instead of a bare string event.
+		span.RecordError(notFoundErr, trace.WithAttributes(
+			attribute.String("app.product.id", req.Id),
+		))
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
-	msg := fmt.Sprintf("Product Found - ID: %s, Name: %s", req.Id, found.Name)
-	span.AddEvent(msg)
 	span.SetAttributes(
 		attribute.String("app.product.name", found.Name),
 	)
-	log.WithContext(ctx).Println(msg)
+	span.AddEvent("Product found", trace.WithAttributes(
+		attribute.String("app.product.id", found.Id),
+		attribute.String("app.product.name", found.Name),
+	))
+	log.WithContext(ctx).Printf("Product Found - ID: %s, Name: %s", found.Id, found.Name)
 	return found, nil
 }
 
 func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProductsRequest) (*pb.SearchProductsResponse, error) {
 	span := trace.SpanFromContext(ctx)
+
+	// Record the query term so slow/failed searches can be correlated with input.
+	span.SetAttributes(
+		attribute.String("app.search.query", req.Query),
+	)
 
 	var result []*pb.Product
 	for _, product := range catalog {
@@ -330,9 +365,17 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 			result = append(result, product)
 		}
 	}
+
+	resultCount := len(result)
 	span.SetAttributes(
-		attribute.Int("app.products_search.count", len(result)),
+		attribute.Int("app.products_search.count", resultCount),
 	)
+	// Emit a span event with both query and result count so the outcome is
+	// self-contained in the event timeline without attribute look-ups.
+	span.AddEvent("Products search completed", trace.WithAttributes(
+		attribute.String("app.search.query", req.Query),
+		attribute.Int("app.products_search.count", resultCount),
+	))
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
 
@@ -344,7 +387,10 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	conn, err := createClient(ctx, p.featureFlagSvcAddr)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		// Use RecordError for consistent exception semantics instead of a raw event.
+		span.RecordError(err, trace.WithAttributes(
+			attribute.String("app.feature_flag.addr", p.featureFlagSvcAddr),
+		))
 		return false
 	}
 	defer conn.Close()
@@ -355,7 +401,11 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	})
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
+		// Use RecordError and carry the flag name as an attribute so it is
+		// queryable without parsing the error message string.
+		span.RecordError(err, trace.WithAttributes(
+			attribute.String("app.feature_flag.name", flagName),
+		))
 		return false
 	}
 
