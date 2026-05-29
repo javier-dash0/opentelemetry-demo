@@ -310,7 +310,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
-		cs.sendToPostProcessor(orderResult)
+		go cs.sendToPostProcessor(orderResult)
 	}
 
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
