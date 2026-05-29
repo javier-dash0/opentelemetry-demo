@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/IBM/sarama"
@@ -31,7 +32,7 @@ import (
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
+	grpccodes "google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
@@ -51,6 +52,27 @@ var tracer trace.Tracer
 var resource *sdkresource.Resource
 var initResourcesOnce sync.Once
 
+// traceHook injects the active trace_id and span_id into every logrus entry so
+// logs can be correlated with traces in the observability backend.
+type traceHook struct{}
+
+func (h *traceHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+func (h *traceHook) Fire(entry *logrus.Entry) error {
+	ctx := entry.Context
+	if ctx == nil {
+		return nil
+	}
+	spanCtx := trace.SpanFromContext(ctx).SpanContext()
+	if spanCtx.IsValid() {
+		entry.Data["trace_id"] = spanCtx.TraceID().String()
+		entry.Data["span_id"] = spanCtx.SpanID().String()
+	}
+	return nil
+}
+
 func init() {
 	log = logrus.New()
 	log.Level = logrus.DebugLevel
@@ -63,6 +85,7 @@ func init() {
 		TimestampFormat: time.RFC3339Nano,
 	}
 	log.Out = os.Stdout
+	log.AddHook(&traceHook{})
 }
 
 func initResource() *sdkresource.Resource {
@@ -228,7 +251,7 @@ func (cs *checkoutService) Check(ctx context.Context, req *healthpb.HealthCheckR
 }
 
 func (cs *checkoutService) Watch(req *healthpb.HealthCheckRequest, ws healthpb.Health_WatchServer) error {
-	return status.Errorf(codes.Unimplemented, "health check via Watch not implemented")
+	return status.Errorf(grpccodes.Unimplemented, "health check via Watch not implemented")
 }
 
 func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderRequest) (*pb.PlaceOrderResponse, error) {
@@ -242,18 +265,21 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	var err error
 	defer func() {
 		if err != nil {
-			span.AddEvent("error", trace.WithAttributes(attribute.String("exception.message", err.Error())))
+			// Use RecordError to emit a standard "exception" span event and
+			// SetStatus so the span is marked ERROR in the trace backend.
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 		}
 	}()
 
 	orderID, err := uuid.NewUUID()
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to generate order uuid")
+		return nil, status.Errorf(grpccodes.Internal, "failed to generate order uuid")
 	}
 
 	prep, err := cs.prepareOrderItemsAndShippingQuoteFromCart(ctx, req.UserId, req.UserCurrency, req.Address)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
+		return nil, status.Errorf(grpccodes.Internal, err.Error())
 	}
 	span.AddEvent("prepared")
 
@@ -268,7 +294,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 
 	txID, err := cs.chargeCard(ctx, total, req.CreditCard)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
+		return nil, status.Errorf(grpccodes.Internal, "failed to charge card: %+v", err)
 	}
 	log.Infof("payment went through (transaction_id: %s)", txID)
 	span.AddEvent("charged",
@@ -276,7 +302,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 
 	shippingTrackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", err)
+		return nil, status.Errorf(grpccodes.Unavailable, "shipping error: %+v", err)
 	}
 	shippingTrackingAttribute := attribute.String("app.shipping.tracking.id", shippingTrackingID)
 	span.AddEvent("shipped", trace.WithAttributes(shippingTrackingAttribute))
@@ -310,7 +336,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
-		cs.sendToPostProcessor(orderResult)
+		cs.sendToPostProcessor(ctx, orderResult)
 	}
 
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
@@ -473,7 +499,7 @@ func (cs *checkoutService) shipOrder(ctx context.Context, address *pb.Address, i
 	return resp.GetTrackingId(), nil
 }
 
-func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
+func (cs *checkoutService) sendToPostProcessor(ctx context.Context, result *pb.OrderResult) {
 	message, err := proto.Marshal(result)
 	if err != nil {
 		log.Errorf("Failed to marshal message to protobuf: %+v", err)
@@ -484,6 +510,12 @@ func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
 		Topic: kafka.Topic,
 		Value: sarama.ByteEncoder(message),
 	}
+
+	// Inject trace context into the Kafka message headers so the publish span
+	// is parented to the current request trace rather than a detached root.
+	otelInterceptor := kafka.NewOTelInterceptor()
+	_, span := otelInterceptor.InjectAndStart(ctx, &msg)
+	defer span.End()
 
 	cs.KafkaProducerClient.Input() <- &msg
 	successMsg := <-cs.KafkaProducerClient.Successes()
