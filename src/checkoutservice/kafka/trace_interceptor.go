@@ -34,9 +34,12 @@ func NewOTelInterceptor() *OTelInterceptor {
 	return &oi
 }
 
-func (oi *OTelInterceptor) OnSend(msg *sarama.ProducerMessage) {
+// InjectAndStart starts a producer span rooted in ctx so the Kafka publish
+// span is linked to the calling request's trace instead of being a detached
+// root span. It injects the trace context into the message headers.
+func (oi *OTelInterceptor) InjectAndStart(ctx context.Context, msg *sarama.ProducerMessage) (context.Context, trace.Span) {
 	spanContext, span := oi.tracer.Start(
-		context.Background(),
+		ctx,
 		fmt.Sprintf("%s publish", msg.Topic),
 		trace.WithSpanKind(trace.SpanKindProducer),
 		trace.WithAttributes(
@@ -48,7 +51,6 @@ func (oi *OTelInterceptor) OnSend(msg *sarama.ProducerMessage) {
 			semconv.MessagingKafkaDestinationPartition(int(msg.Partition)),
 		),
 	)
-	defer span.End()
 
 	carrier := propagation.MapCarrier{}
 	propagator := otel.GetTextMapPropagator()
@@ -57,4 +59,5 @@ func (oi *OTelInterceptor) OnSend(msg *sarama.ProducerMessage) {
 	for key, value := range carrier {
 		msg.Headers = append(msg.Headers, sarama.RecordHeader{Key: []byte(key), Value: []byte(value)})
 	}
+	return spanContext, span
 }
