@@ -9,4 +9,4 @@
 --     example: 0.55 is enabled 55% of the time
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
-
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
