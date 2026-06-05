@@ -9747,8 +9747,11 @@ spec:
             value: service.name=$(OTEL_SERVICE_NAME),service.namespace=opentelemetry-demo,vcs.repository.url.full=https://github.com/dash0hq/opentelemetry-demo
           resources:
             limits:
-              cput: 100m
-              memory: 200Mi
+              cpu: 100m
+              memory: 300Mi
+            requests:
+              cpu: 50m
+              memory: 220Mi
       initContainers:
         - command:
           - sh
