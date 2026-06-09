@@ -2,6 +2,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- Feature Flags created and initialized on startup
+-- All failure-injection and slowness-simulation flags are initialized to 0 (disabled)
+-- to ensure fresh deployments start in a healthy state.
 INSERT INTO public.featureflags (name, description, enabled)
 VALUES
     ('productCatalogFailure', 'Fail product catalog service on a specific product', 0),
