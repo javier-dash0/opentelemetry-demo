@@ -144,6 +144,14 @@ public final class AdService {
       // get the current span in context
       Span span = Span.current();
       try {
+        // Check the failure feature flag before doing any work so that no unnecessary
+        // ad-retrieval or metric recording happens when the request is going to be rejected.
+        logger.debug("checking adServiceFailure feature flag");
+        if (checkAdFailure()) {
+          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
+          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+        }
+
         List<Ad> allAds = new ArrayList<>();
         AdRequestType adRequestType;
         AdResponseType adResponseType;
@@ -178,20 +186,17 @@ public final class AdService {
             Attributes.of(
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
 
-        logger.debug("checking adServiceFailure feature flag");
-        if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
-        }
-
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
         responseObserver.onNext(reply);
         responseObserver.onCompleted();
         logger.debug("getAds request completed");
       } catch (StatusRuntimeException e) {
-        span.addEvent(
-            "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
-        span.setStatus(StatusCode.ERROR);
+        // Record the exception using OTel semantic conventions so that observability
+        // tooling can correlate exception.type / exception.message automatically.
+        span.recordException(
+            e,
+            Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
+        span.setStatus(StatusCode.ERROR, e.getMessage());
         logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
         responseObserver.onError(e);
       }
