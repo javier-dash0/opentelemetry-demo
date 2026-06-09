@@ -1,0 +1,144 @@
+kind: Dashboard
+metadata:
+  name: adservice-improvement
+  project: dash0
+spec:
+  display:
+    name: "AdService — Fix Improvement"
+    description: "Tracks the adServiceFailure fix: error rate, latency, throughput, and request type breakdown for adservice (GetAds)"
+  duration: 3h
+  panels:
+    errorRate:
+      kind: Panel
+      spec:
+        display:
+          name: "Error Rate (%)"
+          description: "Percentage of GetAds spans with ERROR status. Should drop to ~0 once the fix is deployed and the adServiceFailure flag is disabled."
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              format:
+                unit: percent
+            thresholds:
+              defaultColor: "var(--lvl-bg)"
+              steps:
+                - value: 5
+                  color: "var(--decorative-warn-bg)"
+                - value: 20
+                  color: "var(--decorative-error-bg)"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: '100 * sum(rate({otel_metric_name="dash0.spans", service_name="adservice", otel_span_status_code="ERROR"}[$__interval])) / sum(rate({otel_metric_name="dash0.spans", service_name="adservice"}[$__interval]))'
+                  seriesNameFormat: "Error rate"
+    requestRate:
+      kind: Panel
+      spec:
+        display:
+          name: "Request Rate (req/s)"
+          description: "Total GetAds requests per second. Should remain stable across the deploy."
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              format:
+                unit: requests/sec
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'sum(rate({otel_metric_name="dash0.spans", service_name="adservice"}[$__interval]))'
+                  seriesNameFormat: "Total req/s"
+    p95Latency:
+      kind: Panel
+      spec:
+        display:
+          name: "p95 Latency (ms)"
+          description: "95th-percentile GetAds span duration in milliseconds. Moving the failure check to the top of the method reduces wasted work on rejected requests."
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              format:
+                unit: milliseconds
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'histogram_quantile(0.95, sum by(le) (rate({otel_metric_name="dash0.spans.duration", service_name="adservice"}[$__interval]))) * 1000'
+                  seriesNameFormat: "p95 latency"
+    adRequestsByType:
+      kind: Panel
+      spec:
+        display:
+          name: "Ad Requests by Type (req/s)"
+          description: "Breakdown of ad requests by type (TARGETED vs NOT_TARGETED). After the fix, the counter only increments for requests that actually succeed."
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              format:
+                unit: requests/sec
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  query: 'sum by (app_ads_ad_request_type) (rate({otel_metric_name="app.ads.ad_requests", otel_metric_type="sum", service_name="adservice"}[$__interval]))'
+                  seriesNameFormat: "{{app_ads_ad_request_type}}"
+  layouts:
+    - kind: Grid
+      spec:
+        display:
+          title: "Error & Throughput"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            y: 0
+            width: 12
+            height: 7
+            content:
+              $ref: "#/spec/panels/errorRate"
+          - x: 12
+            y: 0
+            width: 12
+            height: 7
+            content:
+              $ref: "#/spec/panels/requestRate"
+    - kind: Grid
+      spec:
+        display:
+          title: "Latency & Ad Counters"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            y: 0
+            width: 12
+            height: 7
+            content:
+              $ref: "#/spec/panels/p95Latency"
+          - x: 12
+            y: 0
+            width: 12
+            height: 7
+            content:
+              $ref: "#/spec/panels/adRequestsByType"
