@@ -148,6 +148,12 @@ public final class AdService {
         AdRequestType adRequestType;
         AdResponseType adResponseType;
 
+        logger.debug("checking adServiceFailure feature flag");
+        if (checkAdFailure()) {
+          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
+          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+        }
+
         span.setAttribute("app.ads.contextKeys", req.getContextKeysList().toString());
         span.setAttribute("app.ads.contextKeys.count", req.getContextKeysCount());
         if (req.getContextKeysCount() > 0) {
@@ -178,19 +184,16 @@ public final class AdService {
             Attributes.of(
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
 
-        logger.debug("checking adServiceFailure feature flag");
-        if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
-        }
-
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
         responseObserver.onNext(reply);
         responseObserver.onCompleted();
         logger.debug("getAds request completed");
       } catch (StatusRuntimeException e) {
         span.addEvent(
-            "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
+            "Error",
+            Attributes.of(
+                AttributeKey.stringKey("exception.message"), e.getMessage(),
+                AttributeKey.stringKey("feature_flag.name"), ADSERVICE_FAIL_FEATURE_FLAG));
         span.setStatus(StatusCode.ERROR);
         logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
         responseObserver.onError(e);
