@@ -60,6 +60,11 @@ func (g *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 			orderResult := pb.OrderResult{}
 			err := proto.Unmarshal(message.Value, &orderResult)
 			if err != nil {
+				g.log.WithFields(logrus.Fields{
+					"messageTopic":     message.Topic,
+					"messagePartition": message.Partition,
+					"messageOffset":    message.Offset,
+				}).WithError(err).Error("Failed to unmarshal Kafka message")
 				return err
 			}
 
@@ -67,6 +72,8 @@ func (g *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 				"orderId":          orderResult.OrderId,
 				"messageTimestamp": message.Timestamp,
 				"messageTopic":     message.Topic,
+				"messagePartition": message.Partition,
+				"messageOffset":    message.Offset,
 			}).Info("Message claimed")
 			session.MarkMessage(message, "")
 

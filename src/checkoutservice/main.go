@@ -20,13 +20,16 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/contrib/bridges/otellogrus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -98,6 +101,21 @@ func initTracerProvider() *sdktrace.TracerProvider {
 	return tp
 }
 
+func initLogProvider() *sdklog.LoggerProvider {
+	ctx := context.Background()
+
+	logExporter, err := otlploggrpc.New(ctx)
+	if err != nil {
+		log.Fatalf("new otlp log grpc exporter failed: %v", err)
+	}
+
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+		sdklog.WithResource(initResource()),
+	)
+	return lp
+}
+
 func initMeterProvider() *sdkmetric.MeterProvider {
 	ctx := context.Background()
 
@@ -136,18 +154,41 @@ func main() {
 	var port string
 	mustMapEnv(&port, "CHECKOUT_SERVICE_PORT")
 
+	lp := initLogProvider()
+	defer func() {
+		if err := lp.Shutdown(context.Background()); err != nil {
+			log.Fatalf("Error shutting down log provider: %v", err)
+		}
+		log.Info("Shutdown log provider")
+	}()
+
+	// Bridge logrus → OTel LoggerProvider so all log calls reach the collector.
+	log.AddHook(otellogrus.NewHook(
+		"checkoutservice",
+		otellogrus.WithLevels([]logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+			logrus.InfoLevel,
+		}),
+		otellogrus.WithLoggerProvider(lp),
+	))
+
 	tp := initTracerProvider()
 	defer func() {
 		if err := tp.Shutdown(context.Background()); err != nil {
-			log.Printf("Error shutting down tracer provider: %v", err)
+			log.WithError(err).Error("Error shutting down tracer provider")
 		}
+		log.Info("Shutdown tracer provider")
 	}()
 
 	mp := initMeterProvider()
 	defer func() {
 		if err := mp.Shutdown(context.Background()); err != nil {
-			log.Printf("Error shutting down meter provider: %v", err)
+			log.WithError(err).Error("Error shutting down meter provider")
 		}
+		log.Info("Shutdown meter provider")
 	}()
 
 	err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
@@ -268,20 +309,30 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 
 	txID, err := cs.chargeCard(ctx, total, req.CreditCard)
 	if err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{
+			"userId":   req.UserId,
+			"currency": req.UserCurrency,
+		}).WithError(err).Error("Failed to charge card")
 		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
 	}
-	log.Infof("payment went through (transaction_id: %s)", txID)
+	log.WithContext(ctx).WithFields(logrus.Fields{
+		"userId":        req.UserId,
+		"transactionId": txID,
+	}).Info("Payment processed successfully")
 	span.AddEvent("charged",
 		trace.WithAttributes(attribute.String("app.payment.transaction.id", txID)))
 
 	shippingTrackingID, err := cs.shipOrder(ctx, req.Address, prep.cartItems)
 	if err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{"userId": req.UserId}).WithError(err).Error("Failed to ship order")
 		return nil, status.Errorf(codes.Unavailable, "shipping error: %+v", err)
 	}
 	shippingTrackingAttribute := attribute.String("app.shipping.tracking.id", shippingTrackingID)
 	span.AddEvent("shipped", trace.WithAttributes(shippingTrackingAttribute))
 
-	_ = cs.emptyUserCart(ctx, req.UserId)
+	if err := cs.emptyUserCart(ctx, req.UserId); err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{"userId": req.UserId}).WithError(err).Warn("Failed to empty user cart after order")
+	}
 
 	orderResult := &pb.OrderResult{
 		OrderId:            orderID.String(),
@@ -303,15 +354,28 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	)
 
 	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
-		log.Warnf("failed to send order confirmation to %q: %+v", req.Email, err)
+		log.WithContext(ctx).WithFields(logrus.Fields{
+			"orderId": orderResult.OrderId,
+			"email":   req.Email,
+		}).WithError(err).Warn("Failed to send order confirmation email")
 	} else {
-		log.Infof("order confirmation email sent to %q", req.Email)
+		log.WithContext(ctx).WithFields(logrus.Fields{
+			"orderId": orderResult.OrderId,
+			"email":   req.Email,
+		}).Info("Order confirmation email sent")
 	}
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
 		cs.sendToPostProcessor(orderResult)
 	}
+
+	log.WithContext(ctx).WithFields(logrus.Fields{
+		"orderId":            orderResult.OrderId,
+		"shippingTrackingId": orderResult.ShippingTrackingId,
+		"userId":             req.UserId,
+		"itemCount":          len(orderResult.Items),
+	}).Info("Order placed successfully")
 
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
 	return resp, nil
@@ -331,18 +395,35 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	var out orderPrep
 	cartItems, err := cs.getUserCart(ctx, userID)
 	if err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{"userId": userID}).WithError(err).Error("Failed to get user cart")
 		return out, fmt.Errorf("cart failure: %+v", err)
 	}
+	log.WithContext(ctx).WithFields(logrus.Fields{
+		"userId":    userID,
+		"itemCount": len(cartItems),
+	}).Info("Retrieved cart for order preparation")
+
 	orderItems, err := cs.prepOrderItems(ctx, cartItems, userCurrency)
 	if err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{
+			"userId":   userID,
+			"currency": userCurrency,
+		}).WithError(err).Error("Failed to prepare order items")
 		return out, fmt.Errorf("failed to prepare order: %+v", err)
 	}
+
 	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems)
 	if err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{"userId": userID}).WithError(err).Error("Failed to get shipping quote")
 		return out, fmt.Errorf("shipping quote failure: %+v", err)
 	}
+
 	shippingPrice, err := cs.convertCurrency(ctx, shippingUSD, userCurrency)
 	if err != nil {
+		log.WithContext(ctx).WithFields(logrus.Fields{
+			"userId":   userID,
+			"currency": userCurrency,
+		}).WithError(err).Error("Failed to convert shipping cost to user currency")
 		return out, fmt.Errorf("failed to convert shipping cost to currency: %+v", err)
 	}
 
