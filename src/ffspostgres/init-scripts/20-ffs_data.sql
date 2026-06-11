@@ -1,10 +1,12 @@
 -- Copyright The OpenTelemetry Authors
 -- SPDX-License-Identifier: Apache-2.0
 
--- Feature Flags created and initialized on startup
+-- Feature Flags created and initialized on startup.
+-- All chaos-engineering flags default to 0 (disabled). Enabling productCatalogFailure
+-- causes repeated gRPC errors on product OLJCESPC7Z — only enable deliberately.
 INSERT INTO public.featureflags (name, description, enabled)
 VALUES
-    ('productCatalogFailure', 'Fail product catalog service on a specific product', 0),
+    ('productCatalogFailure', 'Fail product catalog service on a specific product (chaos engineering — disabled by default)', 0),
     ('recommendationCache', 'Cache recommendations', 0),
     ('adServiceFailure', 'Fail ad service requests', 0),
     ('cartServiceFailure', 'Fail cart service requests', 0),
