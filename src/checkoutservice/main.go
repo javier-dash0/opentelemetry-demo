@@ -15,18 +15,22 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/IBM/sarama"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/contrib/bridges/otellogrus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -114,6 +118,19 @@ func initMeterProvider() *sdkmetric.MeterProvider {
 	return mp
 }
 
+func initLogProvider() *sdklog.LoggerProvider {
+	logExporter, err := otlploggrpc.New(context.Background())
+	if err != nil {
+		log.Fatalf("new otlp log grpc exporter failed: %v", err)
+	}
+
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+		sdklog.WithResource(initResource()),
+	)
+	return lp
+}
+
 type checkoutService struct {
 	productCatalogSvcAddr string
 	cartSvcAddr           string
@@ -149,6 +166,27 @@ func main() {
 			log.Printf("Error shutting down meter provider: %v", err)
 		}
 	}()
+
+	lp := initLogProvider()
+	defer func() {
+		if err := lp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down log provider: %v", err)
+		}
+	}()
+
+	// Bridge logrus entries to the OTel log pipeline so logs carry trace_id /
+	// span_id and are correlated with traces in Dash0.
+	log.AddHook(otellogrus.NewHook(
+		"checkoutservice",
+		otellogrus.WithLevels([]logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+			logrus.InfoLevel,
+		}),
+		otellogrus.WithLoggerProvider(lp),
+	))
 
 	err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
 	if err != nil {
@@ -237,11 +275,13 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 		attribute.String("app.user.id", req.UserId),
 		attribute.String("app.user.currency", req.UserCurrency),
 	)
-	log.Infof("[PlaceOrder] user_id=%q user_currency=%q", req.UserId, req.UserCurrency)
+	log.WithContext(ctx).Infof("[PlaceOrder] user_id=%q user_currency=%q", req.UserId, req.UserCurrency)
 
 	var err error
 	defer func() {
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			span.AddEvent("error", trace.WithAttributes(attribute.String("exception.message", err.Error())))
 		}
 	}()
@@ -270,7 +310,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to charge card: %+v", err)
 	}
-	log.Infof("payment went through (transaction_id: %s)", txID)
+	log.WithContext(ctx).Infof("payment went through (transaction_id: %s)", txID)
 	span.AddEvent("charged",
 		trace.WithAttributes(attribute.String("app.payment.transaction.id", txID)))
 
@@ -303,14 +343,14 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	)
 
 	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
-		log.Warnf("failed to send order confirmation to %q: %+v", req.Email, err)
+		log.WithContext(ctx).Warnf("failed to send order confirmation to %q: %+v", req.Email, err)
 	} else {
-		log.Infof("order confirmation email sent to %q", req.Email)
+		log.WithContext(ctx).Infof("order confirmation email sent to %q", req.Email)
 	}
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
-		cs.sendToPostProcessor(orderResult)
+		cs.sendToPostProcessor(ctx, orderResult)
 	}
 
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
@@ -331,18 +371,26 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	var out orderPrep
 	cartItems, err := cs.getUserCart(ctx, userID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "cart failure")
 		return out, fmt.Errorf("cart failure: %+v", err)
 	}
 	orderItems, err := cs.prepOrderItems(ctx, cartItems, userCurrency)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "failed to prepare order items")
 		return out, fmt.Errorf("failed to prepare order: %+v", err)
 	}
 	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "shipping quote failure")
 		return out, fmt.Errorf("shipping quote failure: %+v", err)
 	}
 	shippingPrice, err := cs.convertCurrency(ctx, shippingUSD, userCurrency)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "failed to convert shipping cost")
 		return out, fmt.Errorf("failed to convert shipping cost to currency: %+v", err)
 	}
 
@@ -403,15 +451,27 @@ func (cs *checkoutService) emptyUserCart(ctx context.Context, userID string) err
 }
 
 func (cs *checkoutService) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, error) {
+	ctx, span := tracer.Start(ctx, "prepOrderItems")
+	defer span.End()
+
+	span.SetAttributes(
+		attribute.Int("app.order.items.count", len(items)),
+		attribute.String("app.user.currency", userCurrency),
+	)
+
 	out := make([]*pb.OrderItem, len(items))
 
 	for i, item := range items {
 		product, err := cs.productCatalogSvcClient.GetProduct(ctx, &pb.GetProductRequest{Id: item.GetProductId()})
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, fmt.Sprintf("failed to get product %s", item.GetProductId()))
 			return nil, fmt.Errorf("failed to get product #%q", item.GetProductId())
 		}
 		price, err := cs.convertCurrency(ctx, product.GetPriceUsd(), userCurrency)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, fmt.Sprintf("failed to convert price of product %s", item.GetProductId()))
 			return nil, fmt.Errorf("failed to convert price of %q to %s", item.GetProductId(), userCurrency)
 		}
 		out[i] = &pb.OrderItem{
@@ -473,12 +533,29 @@ func (cs *checkoutService) shipOrder(ctx context.Context, address *pb.Address, i
 	return resp.GetTrackingId(), nil
 }
 
-func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
+// sendToPostProcessor publishes the order to Kafka for downstream async processing.
+// A child span is created so the Kafka produce is visible in the trace.
+func (cs *checkoutService) sendToPostProcessor(ctx context.Context, result *pb.OrderResult) {
+	ctx, span := tracer.Start(ctx, "orders publish",
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(
+			attribute.String("messaging.system", "kafka"),
+			attribute.String("messaging.destination.name", kafka.Topic),
+			attribute.String("messaging.operation", "publish"),
+			attribute.String("app.order.id", result.OrderId),
+		),
+	)
+	defer span.End()
+
 	message, err := proto.Marshal(result)
 	if err != nil {
-		log.Errorf("Failed to marshal message to protobuf: %+v", err)
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "failed to marshal order to protobuf")
+		log.WithContext(ctx).Errorf("Failed to marshal message to protobuf: %+v", err)
 		return
 	}
+
+	span.SetAttributes(attribute.Int("messaging.message.body.size", len(message)))
 
 	msg := sarama.ProducerMessage{
 		Topic: kafka.Topic,
@@ -487,5 +564,9 @@ func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
 
 	cs.KafkaProducerClient.Input() <- &msg
 	successMsg := <-cs.KafkaProducerClient.Successes()
-	log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+	span.SetAttributes(
+		attribute.Int64("messaging.kafka.message.offset", successMsg.Offset),
+		attribute.Int32("messaging.kafka.destination.partition", successMsg.Partition),
+	)
+	log.WithContext(ctx).Infof("Successful to write message. offset: %v", successMsg.Offset)
 }

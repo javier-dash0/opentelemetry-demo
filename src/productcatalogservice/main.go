@@ -323,6 +323,12 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProductsRequest) (*pb.SearchProductsResponse, error) {
 	span := trace.SpanFromContext(ctx)
 
+	// Record the search query so it can be used to correlate latency/empty-result
+	// patterns with specific search terms in Dash0.
+	span.SetAttributes(
+		attribute.String("app.search.query", req.Query),
+	)
+
 	var result []*pb.Product
 	for _, product := range catalog {
 		if strings.Contains(strings.ToLower(product.Name), strings.ToLower(req.Query)) ||
@@ -330,9 +336,17 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 			result = append(result, product)
 		}
 	}
+
 	span.SetAttributes(
 		attribute.Int("app.products_search.count", len(result)),
 	)
+
+	if len(result) == 0 {
+		span.AddEvent("no results found", trace.WithAttributes(
+			attribute.String("app.search.query", req.Query),
+		))
+	}
+
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
 
