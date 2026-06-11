@@ -37,7 +37,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -175,7 +174,6 @@ func main() {
 	svc := &productCatalog{}
 	var port string
 	mustMapEnv(&port, "PRODUCT_CATALOG_SERVICE_PORT")
-	svc.featureFlagSvcAddr = os.Getenv("FEATURE_FLAG_GRPC_SERVICE_ADDR")
 
 	log.Infof("ProductCatalogService gRPC server started on port: %s", port)
 
@@ -209,7 +207,6 @@ func main() {
 }
 
 type productCatalog struct {
-	featureFlagSvcAddr string
 	pb.UnimplementedProductCatalogServiceServer
 }
 
@@ -285,16 +282,6 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("app.product.id", req.Id),
 	)
 
-	// GetProduct will fail on a specific product when feature flag is enabled
-	if p.checkProductFailure(ctx, req.Id) {
-		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
-		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
-		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
-		log.WithContext(ctx).WithError(err).Errorln(msg)
-		return nil, status.Errorf(codes.Internal, msg)
-	}
-
 	var found *pb.Product
 	for _, product := range catalog {
 		if req.Id == product.Id {
@@ -306,7 +293,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 	if found == nil {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		span.AddEvent("exception", trace.WithAttributes(attribute.String("exception.message", msg)))
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
@@ -336,35 +323,4 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
 
-func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
-		return false
-	}
 
-	conn, err := createClient(ctx, p.featureFlagSvcAddr)
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
-		return false
-	}
-	defer conn.Close()
-
-	flagName := "productCatalogFailure"
-	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
-		Name: flagName,
-	})
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
-		return false
-	}
-
-	return ffResponse.Enabled
-}
-
-func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
-	return grpc.DialContext(ctx, svcAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-	)
-}
