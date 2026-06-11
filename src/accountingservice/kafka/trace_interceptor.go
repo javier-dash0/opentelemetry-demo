@@ -35,15 +35,19 @@ func NewOTelInterceptor(groupID string) *OTelInterceptor {
 	return &oi
 }
 
-func (oi *OTelInterceptor) OnConsume(msg *sarama.ConsumerMessage) {
+// extractTraceContext extracts the W3C trace context propagated by the producer
+// from the Kafka message headers. This is called by ConsumeClaim to parent the
+// process span under the original producer span.
+func extractTraceContext(msg *sarama.ConsumerMessage) context.Context {
 	headers := propagation.MapCarrier{}
-
 	for _, recordHeader := range msg.Headers {
 		headers[string(recordHeader.Key)] = string(recordHeader.Value)
 	}
+	return otel.GetTextMapPropagator().Extract(context.Background(), headers)
+}
 
-	propagator := otel.GetTextMapPropagator()
-	ctx := propagator.Extract(context.Background(), headers)
+func (oi *OTelInterceptor) OnConsume(msg *sarama.ConsumerMessage) {
+	ctx := extractTraceContext(msg)
 
 	_, span := oi.tracer.Start(
 		ctx,
