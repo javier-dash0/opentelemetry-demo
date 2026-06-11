@@ -330,8 +330,15 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 			result = append(result, product)
 		}
 	}
+
+	productIDs := make([]string, 0, len(result))
+	for _, p := range result {
+		productIDs = append(productIDs, p.Id)
+	}
+
 	span.SetAttributes(
 		attribute.Int("app.products_search.count", len(result)),
+		attribute.StringSlice("app.product.id", productIDs),
 	)
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
