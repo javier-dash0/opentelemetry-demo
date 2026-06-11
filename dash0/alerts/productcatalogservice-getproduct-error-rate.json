@@ -1,0 +1,19 @@
+{
+  "name": "productcatalogservice - GetProduct Error Rate",
+  "expression": "sum(increase({otel_metric_name=\"dash0.spans\",service_name=\"productcatalogservice\",service_namespace=\"opentelemetry-demo\",otel_span_status_code=\"ERROR\",rpc_method=\"GetProduct\"}[5m])) > $__threshold",
+  "summary": "productcatalogservice GetProduct is returning errors",
+  "description": "The number of ERROR-status spans on oteldemo.ProductCatalogService/GetProduct has exceeded the threshold in the last 5 minutes. This operation fails when a product ID lookup fails (rpc.grpc.status_code 13 - INTERNAL), causing the frontend to return HTTP 500 to end users. Investigate whether the productCatalogServiceError feature flag is enabled (intentional fault injection) or whether a malformed product ID is reaching the service.",
+  "modes": ["error"],
+  "labels": {
+    "service": "productcatalogservice",
+    "namespace": "opentelemetry-demo"
+  },
+  "annotations": {
+    "runbook": "1. Check whether the productCatalogServiceError feature flag is enabled in featureflagservice — if so, this is intentional fault injection and can be silenced by disabling the flag.\n2. Inspect recent GetProduct spans (otel.span.status.code=ERROR) for suspicious app.product.id values, e.g. IDs with a trailing '}' character which indicates a malformed request from the frontend.\n3. Trace the call chain: frontend HTTP GET -> grpc.oteldemo.ProductCatalogService/GetProduct (CLIENT) -> productcatalogservice SERVER span. The error propagates upward, causing HTTP 500 to the end user."
+  },
+  "thresholds": {
+    "failed": 5
+  },
+  "for": "2m",
+  "interval": "1m"
+}
