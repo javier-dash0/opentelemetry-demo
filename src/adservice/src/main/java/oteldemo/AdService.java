@@ -178,10 +178,19 @@ public final class AdService {
             Attributes.of(
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
 
+        // INTENTIONAL FAULT INJECTION: The adServiceFailure feature flag is evaluated here to
+        // simulate resource exhaustion for observability demos. The 'adServiceFailure' flag in the
+        // FeatureFlagService database controls the probability; it is seeded to 0 and should only
+        // be enabled temporarily for demo purposes. When enabled it causes ~29% error rate on
+        // adservice which propagates to frontend and checkoutservice as visible in Dash0 traces.
         logger.debug("checking adServiceFailure feature flag");
         if (checkAdFailure()) {
           logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+          throw new StatusRuntimeException(
+              Status.RESOURCE_EXHAUSTED.withDescription(
+                  "AdService intentional fault injection triggered by feature flag '"
+                      + ADSERVICE_FAIL_FEATURE_FLAG
+                      + "'. Disable the flag in FeatureFlagService to stop errors."));
         }
 
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
