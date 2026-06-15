@@ -486,6 +486,15 @@ func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
 	}
 
 	cs.KafkaProducerClient.Input() <- &msg
-	successMsg := <-cs.KafkaProducerClient.Successes()
-	log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+
+	// Consume success and error acknowledgements asynchronously to avoid blocking
+	// the gRPC handler — and therefore the PlaceOrder span — on Kafka broker round-trip latency.
+	go func() {
+		select {
+		case successMsg := <-cs.KafkaProducerClient.Successes():
+			log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+		case errMsg := <-cs.KafkaProducerClient.Errors():
+			log.Errorf("Failed to write message to Kafka: %+v", errMsg.Err)
+		}
+	}()
 }
