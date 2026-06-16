@@ -8,5 +8,12 @@
 --     All values between set a percentage chance on each request
 --     example: 0.55 is enabled 55% of the time
 
--- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
+-- Reset failure injection flags to disabled.
+-- These flags were found enabled (adServiceFailure ~0.3, productCatalogFailure ~1.0)
+-- causing sustained RESOURCE_EXHAUSTED and INTERNAL errors on the frontend service
+-- since 2026-06-08, triggering multiple High Span Error Count check rules.
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 
+-- Other examples (uncomment to use):
+-- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
