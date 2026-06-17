@@ -22,13 +22,14 @@ const InstrumentationMiddleware = (handler: NextApiHandler): NextApiHandler => {
       // this span will look similar to the auto-instrumented HTTP span
       const syntheticSpan = trace.getSpan(context.active()) as Span;
       const tracer = trace.getTracer(process.env.OTEL_SERVICE_NAME as string);
-      span = tracer.startSpan(`HTTP ${method}`, {
+      span = tracer.startSpan(`${method} ${target}`, {
         root: true,
         kind: SpanKind.SERVER,
         links: [{ context: syntheticSpan.spanContext() }],
         attributes: {
           'app.synthetic_request': true,
           [SemanticAttributes.HTTP_TARGET]: target,
+          [SemanticAttributes.HTTP_ROUTE]: target,
           [SemanticAttributes.HTTP_METHOD]: method,
           [SemanticAttributes.HTTP_USER_AGENT]: headers['user-agent'] || '',
           [SemanticAttributes.HTTP_URL]: `${headers.host}${url}`,
@@ -56,6 +57,7 @@ const InstrumentationMiddleware = (handler: NextApiHandler): NextApiHandler => {
     } finally {
       requestCounter.add(1, { method, target, status: httpStatus });
       span.setAttribute(SemanticAttributes.HTTP_STATUS_CODE, httpStatus);
+      span.setAttribute(SemanticAttributes.HTTP_ROUTE, target);
       if (baggage?.getEntry('synthetic_request')?.value == 'true') {
         span.end();
       }
