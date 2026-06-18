@@ -8,5 +8,8 @@
 --     All values between set a percentage chance on each request
 --     example: 0.55 is enabled 55% of the time
 
+-- Disable adServiceFailure to stop RESOURCE_EXHAUSTED errors on GetAds requests
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
+
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 
