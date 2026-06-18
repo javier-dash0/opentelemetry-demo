@@ -144,6 +144,22 @@ public final class AdService {
       // get the current span in context
       Span span = Span.current();
       try {
+        // Fail-fast: check the chaos feature flag before doing any work so that
+        // wasted computation is avoided and the failure reason is unambiguous in traces.
+        logger.debug("checking adServiceFailure feature flag");
+        if (checkAdFailure()) {
+          String failureReason = ADSERVICE_FAIL_FEATURE_FLAG + " feature flag enabled";
+          logger.warn(failureReason + ", failing request.");
+          span.addEvent(
+              "Error",
+              Attributes.of(AttributeKey.stringKey("exception.message"), failureReason));
+          span.setStatus(StatusCode.ERROR, failureReason);
+          responseObserver.onError(
+              new StatusRuntimeException(
+                  Status.RESOURCE_EXHAUSTED.withDescription(failureReason)));
+          return;
+        }
+
         List<Ad> allAds = new ArrayList<>();
         AdRequestType adRequestType;
         AdResponseType adResponseType;
@@ -178,20 +194,19 @@ public final class AdService {
             Attributes.of(
                 adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
 
-        logger.debug("checking adServiceFailure feature flag");
-        if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
-        }
-
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
         responseObserver.onNext(reply);
         responseObserver.onCompleted();
         logger.debug("getAds request completed");
       } catch (StatusRuntimeException e) {
         span.addEvent(
-            "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
-        span.setStatus(StatusCode.ERROR);
+            "Error",
+            Attributes.of(
+                AttributeKey.stringKey("exception.message"),
+                e.getStatus().getDescription() != null
+                    ? e.getStatus().getDescription()
+                    : e.getStatus().getCode().name()));
+        span.setStatus(StatusCode.ERROR, e.getStatus().getCode().name());
         logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
         responseObserver.onError(e);
       }
