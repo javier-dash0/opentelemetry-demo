@@ -1,10 +1,16 @@
 -- Copyright The OpenTelemetry Authors
 -- SPDX-License-Identifier: Apache-2.0
 
--- Feature Flags created and initialized on startup
+-- Feature Flags created and initialized on startup.
+-- productCatalogFailure is explicitly reset to 0 on every startup (ON CONFLICT ... DO UPDATE)
+-- to prevent previously-enabled fault injection from persisting across redeployments.
 INSERT INTO public.featureflags (name, description, enabled)
 VALUES
-    ('productCatalogFailure', 'Fail product catalog service on a specific product', 0),
+    ('productCatalogFailure', 'Fail product catalog service on a specific product', 0)
+    ON CONFLICT (name) DO UPDATE SET enabled = EXCLUDED.enabled;
+
+INSERT INTO public.featureflags (name, description, enabled)
+VALUES
     ('recommendationCache', 'Cache recommendations', 0),
     ('adServiceFailure', 'Fail ad service requests', 0),
     ('cartServiceFailure', 'Fail cart service requests', 0),
