@@ -55,13 +55,6 @@ var (
 
 func init() {
 	log = logrus.New()
-
-	var err error
-	catalog, err = readProductFiles()
-	if err != nil {
-		log.Fatalf("Reading Product Files: %v", err)
-		os.Exit(1)
-	}
 }
 
 func initResource() *sdkresource.Resource {
@@ -72,6 +65,11 @@ func initResource() *sdkresource.Resource {
 			sdkresource.WithProcess(),
 			sdkresource.WithContainer(),
 			sdkresource.WithHost(),
+			// (#6) Explicitly set vcs.repository.url.full so Dash0 can auto-link
+			// spans and logs back to the source file in GitHub.
+			sdkresource.WithAttributes(
+				attribute.String("vcs.repository.url.full", "https://github.com/javier-dash0/opentelemetry-demo"),
+			),
 		)
 		resource, _ = sdkresource.Merge(
 			sdkresource.Default(),
@@ -106,7 +104,11 @@ func initMeterProvider() *sdkmetric.MeterProvider {
 	}
 
 	mp := sdkmetric.NewMeterProvider(
-		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
+		// (#7) Lower the export interval from the default 60s to 15s so that
+		// metrics reflect reality more closely for a high-throughput service.
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter,
+			sdkmetric.WithInterval(15*time.Second),
+		)),
 		sdkmetric.WithResource(initResource()),
 	)
 	otel.SetMeterProvider(mp)
@@ -138,7 +140,9 @@ func main() {
 		log.Println("Shutdown log provider")
 	}()
 
-	// Add OpenTelemetry hook to send logs to the collector
+	// Add OpenTelemetry hook to send logs to the collector.
+	// (#5) Include DebugLevel so that verbose diagnostic output also reaches
+	// the OTel log pipeline during incidents.
 	log.AddHook(otellogrus.NewHook(
 		"productcatalogservice",
 		otellogrus.WithLevels([]logrus.Level{
@@ -147,6 +151,7 @@ func main() {
 			logrus.ErrorLevel,
 			logrus.WarnLevel,
 			logrus.InfoLevel,
+			logrus.DebugLevel,
 		}),
 		otellogrus.WithLoggerProvider(lp),
 	))
@@ -170,6 +175,15 @@ func main() {
 	err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second))
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	// (#4) Move catalog loading to main() so it runs after the tracer provider
+	// is initialised and the load can be captured as a span.
+	var catalogErr error
+	catalog, catalogErr = readProductFiles(context.Background())
+	if catalogErr != nil {
+		log.Fatalf("Reading Product Files: %v", catalogErr)
+		os.Exit(1)
 	}
 
 	svc := &productCatalog{}
@@ -213,11 +227,19 @@ type productCatalog struct {
 	pb.UnimplementedProductCatalogServiceServer
 }
 
-func readProductFiles() ([]*pb.Product, error) {
+// readProductFiles loads the product catalog from the products/ directory.
+// (#4) It now accepts a context and records its own span so that slow or
+// failing catalog loads are visible in traces.
+func readProductFiles(ctx context.Context) ([]*pb.Product, error) {
+	tracer := otel.Tracer("productcatalogservice")
+	ctx, span := tracer.Start(ctx, "readProductFiles")
+	defer span.End()
 
 	// find all .json files in the products directory
 	entries, err := os.ReadDir("./products")
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, err.Error())
 		return nil, err
 	}
 
@@ -226,6 +248,8 @@ func readProductFiles() ([]*pb.Product, error) {
 		if strings.HasSuffix(entry.Name(), ".json") {
 			info, err := entry.Info()
 			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(otelcodes.Error, err.Error())
 				return nil, err
 			}
 			jsonFiles = append(jsonFiles, info)
@@ -238,17 +262,22 @@ func readProductFiles() ([]*pb.Product, error) {
 	for _, f := range jsonFiles {
 		jsonData, err := os.ReadFile("./products/" + f.Name())
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return nil, err
 		}
 
 		var res pb.ListProductsResponse
 		if err := protojson.Unmarshal(jsonData, &res); err != nil {
+			span.RecordError(err)
+			span.SetStatus(otelcodes.Error, err.Error())
 			return nil, err
 		}
 
 		products = append(products, res.Products...)
 	}
 
+	span.SetAttributes(attribute.Int("app.products.loaded", len(products)))
 	log.Infof("Loaded %d products", len(products))
 
 	return products, nil
@@ -290,7 +319,10 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		// (#2) Use RecordError to emit a structured exception event with
+		// exception.type, exception.message, and exception.stacktrace, which
+		// makes errors queryable via OTel semantic conventions.
+		span.RecordError(err)
 		log.WithContext(ctx).WithError(err).Errorln(msg)
 		return nil, status.Errorf(codes.Internal, msg)
 	}
@@ -305,8 +337,10 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	if found == nil {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
+		err := fmt.Errorf("product not found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		// (#2) RecordError emits a structured exception event.
+		span.RecordError(err)
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
@@ -330,8 +364,12 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 			result = append(result, product)
 		}
 	}
+	// (#1) Record the query string alongside result count so that slow or
+	// empty searches can be correlated with specific inputs.
 	span.SetAttributes(
+		attribute.String("app.product.search_query", req.Query),
 		attribute.Int("app.products_search.count", len(result)),
+		attribute.Bool("app.products_search.empty", len(result) == 0),
 	)
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
@@ -341,29 +379,39 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 		return false
 	}
 
+	// (#3) Create a dedicated child span for the feature flag lookup so that
+	// its latency and errors are isolated from the parent GetProduct span.
+	tracer := otel.Tracer("productcatalogservice")
+	flagName := "productCatalogFailure"
+	ctx, span := tracer.Start(ctx, "checkProductFailure",
+		trace.WithAttributes(attribute.String("app.feature_flag.name", flagName)),
+	)
+	defer span.End()
+
 	conn, err := createClient(ctx, p.featureFlagSvcAddr)
 	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, "Feature Flag Connection Failed")
 		return false
 	}
 	defer conn.Close()
 
-	flagName := "productCatalogFailure"
 	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
 		Name: flagName,
 	})
 	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
+		span.RecordError(err)
+		span.SetStatus(otelcodes.Error, fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))
 		return false
 	}
 
+	span.SetAttributes(attribute.Bool("app.feature_flag.enabled", ffResponse.Enabled))
 	return ffResponse.Enabled
 }
 
 func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
-	return grpc.DialContext(ctx, svcAddr,
+	// (#8) grpc.DialContext is deprecated in gRPC-Go v1.71; use grpc.NewClient.
+	return grpc.NewClient(svcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
