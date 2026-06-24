@@ -4,10 +4,18 @@ package kafka
 
 import (
 	"context"
+	"fmt"
+
 	pb "github.com/open-telemetry/opentelemetry-demo/src/accountingservice/genproto/oteldemo"
 
 	"github.com/IBM/sarama"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	otelcodes "go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -30,7 +38,8 @@ func StartConsumerGroup(ctx context.Context, brokers []string, log *logrus.Logge
 	}
 
 	handler := groupHandler{
-		log: log,
+		log:    log,
+		tracer: otel.Tracer("github.com/open-telemetry/opentelemetry-demo/accountingservice/consumer"),
 	}
 
 	err = consumerGroup.Consume(ctx, []string{Topic}, &handler)
@@ -42,7 +51,8 @@ func StartConsumerGroup(ctx context.Context, brokers []string, log *logrus.Logge
 }
 
 type groupHandler struct {
-	log *logrus.Logger
+	log    *logrus.Logger
+	tracer trace.Tracer
 }
 
 func (g *groupHandler) Setup(_ sarama.ConsumerGroupSession) error {
@@ -57,18 +67,46 @@ func (g *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 	for {
 		select {
 		case message := <-claim.Messages():
+			// Extract propagated trace context from Kafka message headers.
+			headers := propagation.MapCarrier{}
+			for _, h := range message.Headers {
+				headers[string(h.Key)] = string(h.Value)
+			}
+			parentCtx := otel.GetTextMapPropagator().Extract(context.Background(), headers)
+
+			ctx, span := g.tracer.Start(
+				parentCtx,
+				fmt.Sprintf("%s process", message.Topic),
+				trace.WithSpanKind(trace.SpanKindConsumer),
+				trace.WithAttributes(
+					semconv.MessagingSystemKafka,
+					semconv.MessagingOperationProcess,
+					semconv.MessagingKafkaConsumerGroup(GroupID),
+					semconv.MessagingDestinationName(message.Topic),
+					semconv.MessagingKafkaMessageOffset(int(message.Offset)),
+					semconv.MessagingMessageBodySize(len(message.Value)),
+					semconv.MessagingKafkaDestinationPartition(int(message.Partition)),
+				),
+			)
+
 			orderResult := pb.OrderResult{}
-			err := proto.Unmarshal(message.Value, &orderResult)
-			if err != nil {
+			if err := proto.Unmarshal(message.Value, &orderResult); err != nil {
+				span.RecordError(err)
+				span.SetStatus(otelcodes.Error, err.Error())
+				span.End()
 				return err
 			}
 
-			g.log.WithFields(logrus.Fields{
+			span.SetAttributes(attribute.String("app.order.id", orderResult.OrderId))
+
+			g.log.WithContext(ctx).WithFields(logrus.Fields{
 				"orderId":          orderResult.OrderId,
 				"messageTimestamp": message.Timestamp,
 				"messageTopic":     message.Topic,
 			}).Info("Message claimed")
+
 			session.MarkMessage(message, "")
+			span.End()
 
 		case <-session.Context().Done():
 			return nil
