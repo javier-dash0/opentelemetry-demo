@@ -26,6 +26,10 @@ const request = async <T>({
 
   const responseText = await response.text();
 
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${url}: ${response.status} ${response.statusText}`);
+  }
+
   if (!!responseText) return JSON.parse(responseText);
 
   return undefined as unknown as T;
