@@ -20,13 +20,16 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/contrib/bridges/otellogrus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -114,6 +117,21 @@ func initMeterProvider() *sdkmetric.MeterProvider {
 	return mp
 }
 
+func initLogProvider() *sdklog.LoggerProvider {
+	ctx := context.Background()
+
+	logExporter, err := otlploggrpc.New(ctx)
+	if err != nil {
+		log.Fatalf("new otlp log grpc exporter failed: %v", err)
+	}
+
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+		sdklog.WithResource(initResource()),
+	)
+	return lp
+}
+
 type checkoutService struct {
 	productCatalogSvcAddr string
 	cartSvcAddr           string
@@ -135,6 +153,26 @@ type checkoutService struct {
 func main() {
 	var port string
 	mustMapEnv(&port, "CHECKOUT_SERVICE_PORT")
+
+	lp := initLogProvider()
+	defer func() {
+		if err := lp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down log provider: %v", err)
+		}
+	}()
+
+	// Bridge logrus → OpenTelemetry logs
+	log.AddHook(otellogrus.NewHook(
+		"checkoutservice",
+		otellogrus.WithLevels([]logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+			logrus.InfoLevel,
+		}),
+		otellogrus.WithLoggerProvider(lp),
+	))
 
 	tp := initTracerProvider()
 	defer func() {
