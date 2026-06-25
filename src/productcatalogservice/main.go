@@ -290,7 +290,10 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		span.AddEvent("exception", trace.WithAttributes(
+			attribute.String("exception.type", "FeatureFlagFailure"),
+			attribute.String("exception.message", msg),
+		))
 		log.WithContext(ctx).WithError(err).Errorln(msg)
 		return nil, status.Errorf(codes.Internal, msg)
 	}
@@ -306,7 +309,10 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 	if found == nil {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		span.AddEvent("exception", trace.WithAttributes(
+			attribute.String("exception.type", "ProductNotFound"),
+			attribute.String("exception.message", msg),
+		))
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
