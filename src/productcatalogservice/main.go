@@ -66,17 +66,24 @@ func init() {
 
 func initResource() *sdkresource.Resource {
 	initResourcesOnce.Do(func() {
-		extraResources, _ := sdkresource.New(
+		extraResources, err := sdkresource.New(
 			context.Background(),
 			sdkresource.WithOS(),
 			sdkresource.WithProcess(),
 			sdkresource.WithContainer(),
 			sdkresource.WithHost(),
 		)
-		resource, _ = sdkresource.Merge(
+		if err != nil {
+			log.Warnf("Failed to detect extra resources: %v", err)
+		}
+		resource, err = sdkresource.Merge(
 			sdkresource.Default(),
 			extraResources,
 		)
+		if err != nil {
+			log.Warnf("Failed to merge resources: %v", err)
+			resource = sdkresource.Default()
+		}
 	})
 	return resource
 }
@@ -116,14 +123,14 @@ func initMeterProvider() *sdkmetric.MeterProvider {
 func initLogProvider() *sdklog.LoggerProvider {
 	ctx := context.Background()
 
-	logExporter, err := otlploggrpc.New(context.Background())
+	logExporter, err := otlploggrpc.New(ctx)
 	if err != nil {
 		log.WithContext(ctx).Fatalf("new otlp log grpc exporter failed: %v", err)
 	}
 
 	loggerProvider := sdklog.NewLoggerProvider(
 		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
-		sdklog.WithResource(resource),
+		sdklog.WithResource(initResource()),
 	)
 
 	return loggerProvider
@@ -147,6 +154,7 @@ func main() {
 			logrus.ErrorLevel,
 			logrus.WarnLevel,
 			logrus.InfoLevel,
+			logrus.DebugLevel,
 		}),
 		otellogrus.WithLoggerProvider(lp),
 	))
@@ -290,7 +298,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		span.RecordError(err, trace.WithAttributes(attribute.String("app.product.id", req.Id)))
 		log.WithContext(ctx).WithError(err).Errorln(msg)
 		return nil, status.Errorf(codes.Internal, msg)
 	}
@@ -305,8 +313,9 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	if found == nil {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
+		err := fmt.Errorf("%s", msg)
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		span.RecordError(err, trace.WithAttributes(attribute.String("app.product.id", req.Id)))
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
@@ -341,29 +350,35 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 		return false
 	}
 
-	conn, err := createClient(ctx, p.featureFlagSvcAddr)
+	// Apply a short deadline so a slow feature flag service does not stall the entire GetProduct call.
+	ffCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	conn, err := createClient(p.featureFlagSvcAddr)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		span.RecordError(err, trace.WithAttributes(attribute.String("app.feature_flag.name", "productCatalogFailure")))
+		log.WithContext(ctx).WithError(err).Warn("Feature flag connection failed")
 		return false
 	}
 	defer conn.Close()
 
 	flagName := "productCatalogFailure"
-	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
+	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ffCtx, &pb.EvaluateProbabilityFeatureFlagRequest{
 		Name: flagName,
 	})
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
+		span.RecordError(err, trace.WithAttributes(attribute.String("app.feature_flag.name", flagName)))
+		log.WithContext(ctx).WithError(err).Warnf("EvaluateProbabilityFeatureFlag failed for flag: %s", flagName)
 		return false
 	}
 
 	return ffResponse.Enabled
 }
 
-func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
-	return grpc.DialContext(ctx, svcAddr,
+func createClient(svcAddr string) (*grpc.ClientConn, error) {
+	return grpc.NewClient(svcAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	)
