@@ -11,3 +11,9 @@
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 
+-- Ensure productCatalogFailure chaos injection is disabled.
+-- This flag was found enabled (~1.4% probability) in production, causing
+-- GetProduct to return gRPC INTERNAL errors on product OLJCESPC7Z, resulting
+-- in HTTP 500s surfaced to end users via the frontend and checkout services.
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
+
