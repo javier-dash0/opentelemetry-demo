@@ -323,6 +323,11 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProductsRequest) (*pb.SearchProductsResponse, error) {
 	span := trace.SpanFromContext(ctx)
 
+	// Record the search query so it is visible in traces for debugging and analytics.
+	span.SetAttributes(
+		attribute.String("app.products_search.query", req.Query),
+	)
+
 	var result []*pb.Product
 	for _, product := range catalog {
 		if strings.Contains(strings.ToLower(product.Name), strings.ToLower(req.Query)) ||
@@ -333,6 +338,12 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 	span.SetAttributes(
 		attribute.Int("app.products_search.count", len(result)),
 	)
+
+	log.WithContext(ctx).WithFields(logrus.Fields{
+		"app.products_search.query": req.Query,
+		"app.products_search.count": len(result),
+	}).Info("SearchProducts completed")
+
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
 
@@ -344,7 +355,11 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	conn, err := createClient(ctx, p.featureFlagSvcAddr)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		// Use the semantic "exception" event name so the error surfaces in exception explorers.
+		span.AddEvent("exception", trace.WithAttributes(
+			attribute.String("exception.type", "FeatureFlagConnectionError"),
+			attribute.String("exception.message", "Feature Flag Connection Failed"),
+		))
 		return false
 	}
 	defer conn.Close()
@@ -355,7 +370,11 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	})
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
+		// Use the semantic "exception" event name so the error surfaces in exception explorers.
+		span.AddEvent("exception", trace.WithAttributes(
+			attribute.String("exception.type", "FeatureFlagEvaluationError"),
+			attribute.String("exception.message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName)),
+		))
 		return false
 	}
 
