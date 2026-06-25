@@ -18,9 +18,15 @@ import (
 
 	"github.com/IBM/sarama"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/contrib/bridges/otellogrus"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdkresource "go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
@@ -78,7 +84,62 @@ func initTracerProvider() (*sdktrace.TracerProvider, error) {
 	return tp, nil
 }
 
+func initMeterProvider() (*sdkmetric.MeterProvider, error) {
+	ctx := context.Background()
+
+	exporter, err := otlpmetricgrpc.New(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(exporter)),
+		sdkmetric.WithResource(initResource()),
+	)
+	otel.SetMeterProvider(mp)
+	return mp, nil
+}
+
+func initLogProvider() (*sdklog.LoggerProvider, error) {
+	ctx := context.Background()
+
+	logExporter, err := otlploggrpc.New(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
+		sdklog.WithResource(initResource()),
+	)
+	return lp, nil
+}
+
 func main() {
+	lp, err := initLogProvider()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := lp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down log provider: %v", err)
+		}
+		log.Println("Shutdown log provider")
+	}()
+
+	// Bridge logrus → OpenTelemetry logs
+	log.AddHook(otellogrus.NewHook(
+		"accountingservice",
+		otellogrus.WithLevels([]logrus.Level{
+			logrus.PanicLevel,
+			logrus.FatalLevel,
+			logrus.ErrorLevel,
+			logrus.WarnLevel,
+			logrus.InfoLevel,
+		}),
+		otellogrus.WithLoggerProvider(lp),
+	))
+
 	tp, err := initTracerProvider()
 	if err != nil {
 		log.Fatal(err)
@@ -89,6 +150,21 @@ func main() {
 		}
 		log.Println("Shutdown trace provider")
 	}()
+
+	mp, err := initMeterProvider()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() {
+		if err := mp.Shutdown(context.Background()); err != nil {
+			log.Printf("Error shutting down meter provider: %v", err)
+		}
+		log.Println("Shutdown meter provider")
+	}()
+
+	if err := runtime.Start(runtime.WithMinimumReadMemStatsInterval(time.Second)); err != nil {
+		log.Fatal(err)
+	}
 
 	var brokers string
 	mustMapEnv(&brokers, "KAFKA_SERVICE_ADDR")
