@@ -69,6 +69,9 @@ public class RedisCartStore : ICartStore
             }
 
             _logger.LogDebug("Connecting to Redis: {_connectionString}", _connectionString);
+            // Enforce a hard connection timeout so a completely unreachable Redis does not block
+            // indefinitely while the retry loop (RedisRetryNumber × exponential back-off) runs.
+            _redisConnectionOptions.ConnectTimeout = 5000; // ms
             _redis = ConnectionMultiplexer.Connect(_redisConnectionOptions);
 
             if (_redis == null || !_redis.IsConnected)

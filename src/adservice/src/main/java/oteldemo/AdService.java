@@ -190,8 +190,13 @@ public final class AdService {
         logger.debug("getAds request completed");
       } catch (StatusRuntimeException e) {
         span.addEvent(
-            "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
-        span.setStatus(StatusCode.ERROR);
+            "exception",
+            Attributes.of(
+                AttributeKey.stringKey("exception.type"), e.getClass().getName(),
+                AttributeKey.stringKey("exception.message"), e.getStatus().getDescription() != null
+                    ? e.getStatus().getDescription()
+                    : e.getStatus().getCode().name()));
+        span.setStatus(StatusCode.ERROR, e.getStatus().getCode().name());
         logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
         responseObserver.onError(e);
       }
