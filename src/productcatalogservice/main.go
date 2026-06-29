@@ -307,7 +307,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).Error("Product Not Found")
+		log.WithContext(ctx).WithField("app.product.id", req.Id).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
@@ -337,6 +337,12 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
+	// Allow the failure injection to be disabled via an explicit environment variable
+	// without requiring changes to the feature flag service configuration.
+	if os.Getenv("PRODUCT_CATALOG_FAILURE_ENABLED") != "true" {
+		return false
+	}
+
 	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
 		return false
 	}
