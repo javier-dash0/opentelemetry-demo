@@ -21,3 +21,10 @@ UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 -- in HTTP 500s surfaced to end users via the frontend and checkout services.
 UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 
+-- Disable productCatalogFailure fault injection flag to prevent unintended high error
+-- rates on the GetProduct endpoint for product OLJCESPC7Z.
+-- When this flag is set to a non-zero value, the productcatalogservice probabilistically
+-- returns Internal errors for that product, triggering the "Product Catalog Service High
+-- Error Percentage" alert.
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
+
