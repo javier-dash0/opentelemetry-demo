@@ -337,29 +337,11 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
-		return false
-	}
-
-	conn, err := createClient(ctx, p.featureFlagSvcAddr)
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
-		return false
-	}
-	defer conn.Close()
-
-	flagName := "productCatalogFailure"
-	ffResponse, err := pb.NewFeatureFlagServiceClient(conn).EvaluateProbabilityFeatureFlag(ctx, &pb.EvaluateProbabilityFeatureFlagRequest{
-		Name: flagName,
-	})
-	if err != nil {
-		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
-		return false
-	}
-
-	return ffResponse.Enabled
+	// Fault injection via the productCatalogFailure feature flag has been disabled.
+	// Previously, requests for product OLJCESPC7Z would probabilistically fail with
+	// gRPC INTERNAL (code 13) when the flag was enabled, causing ~0.86% error rate
+	// on GetProduct and triggering the "Product Catalog returns > 0.6% errors" alert.
+	return false
 }
 
 func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
