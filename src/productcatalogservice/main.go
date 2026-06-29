@@ -307,7 +307,7 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).Error("Product Not Found")
+		log.WithContext(ctx).Errorf("Product Not Found: %s", req.Id)
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
@@ -344,7 +344,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	conn, err := createClient(ctx, p.featureFlagSvcAddr)
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		span.AddEvent("Feature Flag Connection Failed")
 		return false
 	}
 	defer conn.Close()
@@ -355,7 +355,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	})
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
-		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
+		span.AddEvent(fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))
 		return false
 	}
 
