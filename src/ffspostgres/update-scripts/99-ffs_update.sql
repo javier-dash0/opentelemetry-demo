@@ -8,6 +8,10 @@
 --     All values between set a percentage chance on each request
 --     example: 0.55 is enabled 55% of the time
 
+-- Disable productCatalogFailure to prevent intentional GetProduct errors on OLJCESPC7Z
+-- (was causing sustained span error alerts on productcatalogservice)
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
+
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 
