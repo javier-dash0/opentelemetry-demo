@@ -486,6 +486,8 @@ func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
 	}
 
 	cs.KafkaProducerClient.Input() <- &msg
-	successMsg := <-cs.KafkaProducerClient.Successes()
-	log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+	go func() {
+		successMsg := <-cs.KafkaProducerClient.Successes()
+		log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+	}()
 }
