@@ -207,8 +207,8 @@ if browser_traffic_enabled:
                     await page.goto("/cart", wait_until="domcontentloaded")
                     await page.wait_for_timeout(random.randint(2000, 15000))  # giving the browser time to export the traces
 
-                if (random.randint(0, 8) == 0): # directly open unknown product page with a chance of 1:8
-                    await page.goto("/product/ZFYYMZ29E6", wait_until="domcontentloaded")
+                if (random.randint(0, 8) == 0): # directly open a product page with a chance of 1:8
+                    await page.goto("/product/6E92ZMYYFZ", wait_until="domcontentloaded")
 
                 if (random.randint(0, 5) == 0): # checkout with a chance of 1:5
                     await page.click('a[data-cy="cart-icon"]')
