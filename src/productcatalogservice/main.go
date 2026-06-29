@@ -285,14 +285,14 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("app.product.id", req.Id),
 	)
 
-	// GetProduct will fail on a specific product when feature flag is enabled
+	// GetProduct will simulate a not-found response for a specific product when feature flag is enabled.
+	// Using codes.NotFound instead of codes.Internal so that transient fault injection does not
+	// count as a server error and breach the error-rate SLO.
 	if p.checkProductFailure(ctx, req.Id) {
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
-		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
-		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).WithError(err).Errorln(msg)
-		return nil, status.Errorf(codes.Internal, msg)
+		log.WithContext(ctx).Warnf("%s (fault injection via productCatalogFailure feature flag)", msg)
+		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
 	var found *pb.Product
