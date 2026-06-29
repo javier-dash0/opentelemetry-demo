@@ -288,11 +288,10 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 	// GetProduct will fail on a specific product when feature flag is enabled
 	if p.checkProductFailure(ctx, req.Id) {
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
-		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).WithError(err).Errorln(msg)
-		return nil, status.Errorf(codes.Internal, msg)
+		log.WithContext(ctx).WithError(fmt.Errorf("productCatalogFailure feature flag triggered")).Errorln(msg)
+		return nil, status.Errorf(codes.Internal, "product lookup failed")
 	}
 
 	var found *pb.Product
@@ -337,6 +336,13 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
+	// Failure injection is disabled when PRODUCT_CATALOG_FAILURE_FEATURE_FLAG_ENABLED is explicitly
+	// set to "false", allowing operators to turn off artificial error injection without redeploying
+	// a build that omits the feature-flag integration.
+	if os.Getenv("PRODUCT_CATALOG_FAILURE_FEATURE_FLAG_ENABLED") == "false" {
+		return false
+	}
+
 	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
 		return false
 	}
