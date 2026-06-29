@@ -10,3 +10,6 @@
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 
+-- Disable productCatalogFailure to prevent intentional errors on product OLJCESPC7Z
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
+
