@@ -281,13 +281,17 @@ func (p *productCatalog) ListProducts(ctx context.Context, req *pb.Empty) (*pb.L
 
 func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductRequest) (*pb.Product, error) {
 	span := trace.SpanFromContext(ctx)
+
+	// Sanitize the product ID to remove any extraneous whitespace or control characters
+	productID := strings.TrimSpace(req.Id)
+
 	span.SetAttributes(
-		attribute.String("app.product.id", req.Id),
+		attribute.String("app.product.id", productID),
 	)
 
 	// GetProduct will fail on a specific product when feature flag is enabled
-	if p.checkProductFailure(ctx, req.Id) {
-		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
+	if p.checkProductFailure(ctx, productID) {
+		msg := fmt.Sprintf("Product Id Lookup Failed: %s", productID)
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
@@ -297,21 +301,21 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	var found *pb.Product
 	for _, product := range catalog {
-		if req.Id == product.Id {
+		if productID == product.Id {
 			found = product
 			break
 		}
 	}
 
 	if found == nil {
-		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
+		msg := fmt.Sprintf("Product Id Not Found: %s", productID)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
 	}
 
-	msg := fmt.Sprintf("Product Found - ID: %s, Name: %s", req.Id, found.Name)
+	msg := fmt.Sprintf("Product Found - ID: %s, Name: %s", productID, found.Name)
 	span.AddEvent(msg)
 	span.SetAttributes(
 		attribute.String("app.product.name", found.Name),

@@ -2,6 +2,9 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- Feature Flags created and initialized on startup
+-- NOTE: productCatalogFailure must remain disabled (0) by default.
+-- Enabling it will intentionally cause GetProduct to fail for product OLJCESPC7Z,
+-- which triggers high error rate alerts on productcatalogservice.
 INSERT INTO public.featureflags (name, description, enabled)
 VALUES
     ('productCatalogFailure', 'Fail product catalog service on a specific product', 0),
