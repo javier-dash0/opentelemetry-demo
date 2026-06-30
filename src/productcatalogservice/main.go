@@ -293,8 +293,8 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
-		log.WithContext(ctx).Warnln(msg)
-		return nil, status.Errorf(codes.NotFound, msg)
+		log.WithContext(ctx).WithField("app.product.id", req.Id).Warnln(msg)
+		return nil, status.Errorf(codes.Unavailable, msg)
 	}
 
 	var found *pb.Product
