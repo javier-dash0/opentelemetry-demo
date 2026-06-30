@@ -285,12 +285,16 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("app.product.id", req.Id),
 	)
 
-	// GetProduct will fail on a specific product when feature flag is enabled
-	if p.checkProductFailure(ctx, req.Id) {
+	// GetProduct will fail on a specific product when feature flag is enabled.
+	// Set PRODUCT_CATALOG_CHAOS_DISABLED=true to disable this failure injection entirely.
+	if os.Getenv("PRODUCT_CATALOG_CHAOS_DISABLED") != "true" && p.checkProductFailure(ctx, req.Id) {
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
-		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
+		err := fmt.Errorf("productCatalogFailure feature flag is enabled; chaos injection triggered for product %s", req.Id)
 		span.SetStatus(otelcodes.Error, msg)
-		span.AddEvent(msg)
+		span.AddEvent(msg, trace.WithAttributes(
+			attribute.String("app.product.id", req.Id),
+			attribute.String("app.failure.reason", "productCatalogFailure feature flag enabled"),
+		))
 		log.WithContext(ctx).WithError(err).Errorln(msg)
 		return nil, status.Errorf(codes.Internal, msg)
 	}
