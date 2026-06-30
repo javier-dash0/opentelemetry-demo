@@ -68,7 +68,7 @@ def get_product_list(request_product_ids):
         max_responses = 5
 
         # Formulate the list of characters to list of strings
-        request_product_ids_str = ''.join(request_product_ids)
+        request_product_ids_str = ','.join(request_product_ids)
         request_product_ids = request_product_ids_str.split(',')
 
         # Feature flag scenario - Cache Leak
