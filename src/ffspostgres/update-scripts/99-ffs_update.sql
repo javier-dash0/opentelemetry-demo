@@ -13,3 +13,7 @@ UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 
+-- Ensure adServiceFailure is disabled to prevent RESOURCE_EXHAUSTED errors in adservice
+-- This flag was left enabled causing ~30% error rate on the GetAds RPC (gRPC status 8)
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
+
