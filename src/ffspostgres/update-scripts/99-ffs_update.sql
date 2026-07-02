@@ -8,12 +8,10 @@
 --     All values between set a percentage chance on each request
 --     example: 0.55 is enabled 55% of the time
 
--- Disable adServiceFailure to stop RESOURCE_EXHAUSTED errors on GetAds requests
-UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
+-- Disable adServiceFailure to stop RESOURCE_EXHAUSTED error injection on GetAds
+-- Root cause: flag was left enabled (non-zero probability), causing ~28% error rate
+-- on adservice GetAds RPC (gRPC status 8, RESOURCE_EXHAUSTED).
+-- See: https://runbooks.example.com/adservice-errors
+UPDATE public.featureflags SET enabled = 0.0 WHERE name = 'adServiceFailure';
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
-
--- Ensure adServiceFailure is disabled to prevent RESOURCE_EXHAUSTED errors in adservice
--- This flag was left enabled causing ~30% error rate on the GetAds RPC (gRPC status 8)
-UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
-
