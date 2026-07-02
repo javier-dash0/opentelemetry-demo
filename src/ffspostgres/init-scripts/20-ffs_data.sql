@@ -1,7 +1,11 @@
 -- Copyright The OpenTelemetry Authors
 -- SPDX-License-Identifier: Apache-2.0
 
--- Feature Flags created and initialized on startup
+-- Feature Flags created and initialized on startup.
+-- ON CONFLICT UPDATE ensures failure-injection flags are always reset to 0 (disabled) on
+-- container restart or re-deploy. This prevents a runaway enabled state from persisting
+-- across deployments and causing a sustained high-error-count alert (e.g. adServiceFailure
+-- triggering gRPC RESOURCE_EXHAUSTED on every GetAds call).
 INSERT INTO public.featureflags (name, description, enabled)
 VALUES
     ('productCatalogFailure', 'Fail product catalog service on a specific product', 0),
@@ -14,4 +18,11 @@ VALUES
     ('shippingServiceSimulateSlowness', 'Simulate slow response times in the shipping service', 0),
     ('shippingServiceSimulateSlownessLowerBound', 'Minimum simulated delay in milliseconds in shipping service, if enabled', 250),
     ('shippingServiceSimulateSlownessUpperBound', 'Maximum simulated delay in milliseconds in shipping service, if enabled', 400)
-    ON CONFLICT DO NOTHING;
+    ON CONFLICT (name) DO UPDATE SET enabled = EXCLUDED.enabled
+        WHERE featureflags.name IN (
+            'adServiceFailure',
+            'productCatalogFailure',
+            'cartServiceFailure',
+            'paymentServiceSimulateSlowness',
+            'shippingServiceSimulateSlowness'
+        );
