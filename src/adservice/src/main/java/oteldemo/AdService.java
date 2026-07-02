@@ -180,8 +180,12 @@ public final class AdService {
 
         logger.debug("checking adServiceFailure feature flag");
         if (checkAdFailure()) {
-          logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
-          throw new StatusRuntimeException(Status.RESOURCE_EXHAUSTED);
+          logger.warn(
+              ADSERVICE_FAIL_FEATURE_FLAG
+                  + " fail feature flag enabled, falling back to random ads.");
+          allAds = service.getRandomAds();
+          adResponseType = AdResponseType.RANDOM;
+          span.setAttribute("app.ads.failover", true);
         }
 
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
