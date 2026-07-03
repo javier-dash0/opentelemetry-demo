@@ -15,3 +15,6 @@ UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
 
+-- Disable productCatalogFailure fault injection (was causing ~1% error rate on GetProduct)
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
+
