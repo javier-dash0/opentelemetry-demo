@@ -9,4 +9,10 @@
 --     example: 0.55 is enabled 55% of the time
 
 -- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
+
+-- Disable adServiceFailure flag to prevent intentional RESOURCE_EXHAUSTED errors on GetAds.
+-- This flag was causing ~27-31% of adservice/GetAds requests to fail.
+-- See: https://runbooks.example.com/adservice-errors
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
 
