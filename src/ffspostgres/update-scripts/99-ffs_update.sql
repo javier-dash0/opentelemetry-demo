@@ -28,3 +28,6 @@ UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 -- Error Percentage" alert.
 UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
 
+-- Disable productCatalogFailure fault injection (was causing GetProduct to fail ~1.1% of requests)
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
+
