@@ -1,0 +1,50 @@
+# Copyright The OpenTelemetry Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Remediation Job: disable the adServiceFailure feature flag.
+#
+# Run this when the adservice RESOURCE_EXHAUSTED alert fires and the root cause
+# is the adServiceFailure chaos flag being left enabled in FeatureFlagService.
+#
+# Usage:
+#   kubectl apply -f kubernetes/remediation/disable-adservicefailure-flag-job.yaml -n <namespace>
+#
+# The job connects directly to the ffspostgres database and sets
+# enabled = 0 for the adServiceFailure flag.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: disable-adservicefailure-flag
+  namespace: otel-demo
+  labels:
+    app.kubernetes.io/component: remediation
+    app.kubernetes.io/name: disable-adservicefailure-flag
+  annotations:
+    dash0.com/reason: "Automated remediation for adServiceFailure chaos flag — triggered by adservice RESOURCE_EXHAUSTED alert"
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: remediation
+        app.kubernetes.io/name: disable-adservicefailure-flag
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: psql
+          image: postgres:14-alpine
+          command:
+            - psql
+            - -h
+            - opentelemetry-demo-ffspostgres
+            - -U
+            - ffs
+            - -d
+            - ffs
+            - -c
+            - "UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';"
+          env:
+            - name: PGPASSWORD
+              value: ffs
