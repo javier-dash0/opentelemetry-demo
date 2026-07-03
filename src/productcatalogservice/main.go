@@ -176,6 +176,14 @@ func main() {
 	var port string
 	mustMapEnv(&port, "PRODUCT_CATALOG_SERVICE_PORT")
 	svc.featureFlagSvcAddr = os.Getenv("FEATURE_FLAG_GRPC_SERVICE_ADDR")
+	// PRODUCT_CATALOG_FAILURE_PRODUCT_ID controls which product ID is subject to
+	// the productCatalogFailure chaos feature flag. Defaults to the historically
+	// hardcoded value. Set to an empty string to disable fault injection entirely
+	// regardless of the feature flag state.
+	svc.failureProductID = os.Getenv("PRODUCT_CATALOG_FAILURE_PRODUCT_ID")
+	if svc.failureProductID == "" {
+		svc.failureProductID = "OLJCESPC7Z"
+	}
 
 	log.Infof("ProductCatalogService gRPC server started on port: %s", port)
 
@@ -209,7 +217,8 @@ func main() {
 }
 
 type productCatalog struct {
-	featureFlagSvcAddr string
+	featureFlagSvcAddr      string
+	failureProductID        string // product ID that triggers chaos via productCatalogFailure flag
 	pb.UnimplementedProductCatalogServiceServer
 }
 
@@ -337,7 +346,8 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
+	// Fault injection is disabled when failureProductID is empty or featureFlagSvcAddr is not configured.
+	if p.failureProductID == "" || id != p.failureProductID || p.featureFlagSvcAddr == "" {
 		return false
 	}
 
