@@ -2,6 +2,9 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- Feature Flags created and initialized on startup
+-- WARNING: productCatalogFailure intentionally injects errors on product OLJCESPC7Z via the
+-- checkProductFailure code path. Keep this at 0 (disabled) in production environments to
+-- prevent the "High Span Error Count per Service" check rule from firing.
 INSERT INTO public.featureflags (name, description, enabled)
 VALUES
     ('productCatalogFailure', 'Fail product catalog service on a specific product', 0),

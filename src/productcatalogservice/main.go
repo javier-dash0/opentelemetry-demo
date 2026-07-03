@@ -336,6 +336,13 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 	return &pb.SearchProductsResponse{Results: result}, nil
 }
 
+// checkProductFailure queries the feature flag service to determine whether the
+// "productCatalogFailure" chaos flag is enabled for the given product ID.
+// This flag is intended for demo/testing purposes only and must be kept disabled
+// (enabled=0 in the ffspostgres seed SQL) in production environments.
+// When enabled, GetProduct calls for product OLJCESPC7Z will intentionally return
+// a gRPC Internal error, which will trigger the "High Span Error Count per Service"
+// check rule in Dash0.
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
 	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
 		return false
