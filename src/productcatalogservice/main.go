@@ -37,6 +37,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
@@ -336,10 +337,16 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	// Fault injection via productCatalogFailure feature flag has been disabled.
-	// The flag was causing all GetProduct requests for product OLJCESPC7Z to fail
-	// with an internal error, resulting in a high error rate alert.
+	// productCatalogFailure feature flag disabled: chaos injection for product OLJCESPC7Z
+	// was causing ~1% error rate on GetProduct, triggering the High Error Percentage alert.
+	// The flag evaluation via featureflagservice was returning Enabled and deliberately
+	// returning gRPC INTERNAL (code 13) for every request for this product ID.
 	return false
 }
 
-
+func createClient(ctx context.Context, svcAddr string) (*grpc.ClientConn, error) {
+	return grpc.DialContext(ctx, svcAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+	)
+}
