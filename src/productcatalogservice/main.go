@@ -285,14 +285,17 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 		attribute.String("app.product.id", req.Id),
 	)
 
-	// GetProduct will fail on a specific product when feature flag is enabled
+	// GetProduct will fail on a specific product when the productCatalogFailure
+	// feature flag is enabled. This is intentional chaos engineering behaviour.
+	// codes.Unavailable is used (rather than codes.Internal) to signal that this
+	// is a controlled, transient failure rather than an unhandled bug.
 	if p.checkProductFailure(ctx, req.Id) {
 		msg := fmt.Sprintf("Product Id Lookup Failed: %s", req.Id)
 		err := fmt.Errorf("ProductCatalogService Fail Feature Flag Enabled")
 		span.SetStatus(otelcodes.Error, msg)
 		span.AddEvent(msg)
 		log.WithContext(ctx).WithError(err).Errorln(msg)
-		return nil, status.Errorf(codes.Internal, msg)
+		return nil, status.Errorf(codes.Unavailable, msg)
 	}
 
 	var found *pb.Product
