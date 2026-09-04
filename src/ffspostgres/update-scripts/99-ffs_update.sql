@@ -8,5 +8,5 @@
 --     All values between set a percentage chance on each request
 --     example: 0.55 is enabled 55% of the time
 
--- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
-
+-- Disable productCatalogFailure to prevent elevated error rates on product lookups
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';

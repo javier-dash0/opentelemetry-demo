@@ -15,3 +15,7 @@ VALUES
     ('shippingServiceSimulateSlownessLowerBound', 'Minimum simulated delay in milliseconds in shipping service, if enabled', 250),
     ('shippingServiceSimulateSlownessUpperBound', 'Maximum simulated delay in milliseconds in shipping service, if enabled', 400)
     ON CONFLICT DO NOTHING;
+
+-- Ensure productCatalogFailure is disabled by default; it should only be
+-- enabled intentionally for chaos-engineering scenarios.
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'productCatalogFailure';
