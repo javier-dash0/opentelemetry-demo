@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [frontend] return HTTP 404 instead of 500 when a product does not exist
+  ([#118](https://github.com/javier-dash0/opentelemetry-demo/pull/118))
 * [checkoutservice] add producer interceptor for tracing
   ([#1400](https://github.com/open-telemetry/opentelemetry-demo/pull/1400))
 * [chore] increase memory for Collector and Jaeger
