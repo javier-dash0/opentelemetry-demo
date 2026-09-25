@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [productcatalogservice] make `GetProduct` fault injection opt-in via
+  `PRODUCT_CATALOG_FAILURE_PRODUCT_ID` instead of hardcoding `OLJCESPC7Z`
 * [checkoutservice] add producer interceptor for tracing
   ([#1400](https://github.com/open-telemetry/opentelemetry-demo/pull/1400))
 * [chore] increase memory for Collector and Jaeger

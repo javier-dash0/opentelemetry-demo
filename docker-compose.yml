@@ -439,6 +439,9 @@ services:
     environment:
       - PRODUCT_CATALOG_SERVICE_PORT
       - FEATURE_FLAG_GRPC_SERVICE_ADDR
+      # Opt-in fault injection: set to a product ID (e.g. OLJCESPC7Z) to let the
+      # productCatalogFailure feature flag fail lookups for it. Empty disables it.
+      - PRODUCT_CATALOG_FAILURE_PRODUCT_ID=${PRODUCT_CATALOG_FAILURE_PRODUCT_ID:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
       - OTEL_RESOURCE_ATTRIBUTES
