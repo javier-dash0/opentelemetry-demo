@@ -1,5 +1,26 @@
 # Product Catalog Service
 
+## Fault injection
+
+`GetProduct` can fail lookups on purpose so the demo has a reproducible error to
+investigate. This is **opt-in** and controlled by two settings:
+
+| Setting | Where | Effect |
+| :--- | :--- | :--- |
+| `PRODUCT_CATALOG_FAILURE_PRODUCT_ID` | env var on this service | The product ID that may fail. Unset or empty disables fault injection completely. |
+| `productCatalogFailure` | `featureflagservice` | Probability (`0`–`1`) that a lookup of that product ID fails with gRPC `INTERNAL`. |
+
+Both have to be set for a request to fail. Enable the scenario with:
+
+```sh
+PRODUCT_CATALOG_FAILURE_PRODUCT_ID=OLJCESPC7Z
+```
+
+and set `productCatalogFailure` to the desired probability in the
+featureflagservice UI. Leaving the env var empty keeps the flag inert, so a
+probability left behind in the featureflagservice database cannot quietly raise
+this service's error rate.
+
 When this service is run the output should be similar to the following
 
 ```json

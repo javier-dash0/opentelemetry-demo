@@ -10171,6 +10171,12 @@ spec:
             value: "8080"
           - name: FEATURE_FLAG_GRPC_SERVICE_ADDR
             value: 'opentelemetry-demo-featureflagservice:50053'
+          # Fault injection for GetProduct is opt-in. Set this to a product ID
+          # (e.g. OLJCESPC7Z) to let the productCatalogFailure feature flag fail
+          # lookups for it. Empty keeps the flag inert regardless of its value in
+          # the featureflagservice database.
+          - name: PRODUCT_CATALOG_FAILURE_PRODUCT_ID
+            value: ''
           - name: OTEL_EXPORTER_OTLP_ENDPOINT
             value: http://$(OTEL_COLLECTOR_NAME):4317
           - name: OTEL_RESOURCE_ATTRIBUTES

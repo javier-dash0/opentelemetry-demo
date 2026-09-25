@@ -177,6 +177,18 @@ func main() {
 	mustMapEnv(&port, "PRODUCT_CATALOG_SERVICE_PORT")
 	svc.featureFlagSvcAddr = os.Getenv("FEATURE_FLAG_GRPC_SERVICE_ADDR")
 
+	// Fault injection for GetProduct is opt-in. Set PRODUCT_CATALOG_FAILURE_PRODUCT_ID
+	// to the product ID that should fail (historically "OLJCESPC7Z") to enable it; the
+	// productCatalogFailure feature flag then controls the failure probability. Left
+	// unset, no request can be failed on purpose, so the service's error rate reflects
+	// real faults only.
+	svc.failureProductID = os.Getenv("PRODUCT_CATALOG_FAILURE_PRODUCT_ID")
+	if svc.failureProductID == "" {
+		log.Info("Fault injection disabled: PRODUCT_CATALOG_FAILURE_PRODUCT_ID is unset")
+	} else {
+		log.Infof("Fault injection enabled for product ID %q via the productCatalogFailure feature flag", svc.failureProductID)
+	}
+
 	log.Infof("ProductCatalogService gRPC server started on port: %s", port)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%s", port))
@@ -210,6 +222,9 @@ func main() {
 
 type productCatalog struct {
 	featureFlagSvcAddr string
+	// failureProductID is the product ID that fault injection applies to. Empty
+	// disables fault injection entirely, whatever the feature flag is set to.
+	failureProductID string
 	pb.UnimplementedProductCatalogServiceServer
 }
 
@@ -337,7 +352,9 @@ func (p *productCatalog) SearchProducts(ctx context.Context, req *pb.SearchProdu
 }
 
 func (p *productCatalog) checkProductFailure(ctx context.Context, id string) bool {
-	if id != "OLJCESPC7Z" || p.featureFlagSvcAddr == "" {
+	// No configured failure product means fault injection is off, so the
+	// productCatalogFailure flag is never consulted and cannot fail a request.
+	if p.failureProductID == "" || id != p.failureProductID || p.featureFlagSvcAddr == "" {
 		return false
 	}
 
