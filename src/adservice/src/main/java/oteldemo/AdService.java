@@ -62,6 +62,12 @@ public final class AdService {
       AttributeKey.stringKey("app.ads.ad_request_type");
   private static final AttributeKey<String> adResponseTypeKey =
       AttributeKey.stringKey("app.ads.ad_response_type");
+  private static final AttributeKey<String> outcomeKey = AttributeKey.stringKey("app.ads.outcome");
+  private static final AttributeKey<String> rpcStatusCodeKey =
+      AttributeKey.stringKey("rpc.grpc.status_code_name");
+
+  private static final String OUTCOME_SUCCESS = "success";
+  private static final String OUTCOME_ERROR = "error";
 
   private void start() throws IOException {
     int port =
@@ -143,10 +149,13 @@ public final class AdService {
 
       // get the current span in context
       Span span = Span.current();
+      // Hoisted out of the try block so that the failure paths can report the counter with the same
+      // request/response dimensions as the success path.
+      AdRequestType adRequestType =
+          req.getContextKeysCount() > 0 ? AdRequestType.TARGETED : AdRequestType.NOT_TARGETED;
+      AdResponseType adResponseType = AdResponseType.RANDOM;
       try {
         List<Ad> allAds = new ArrayList<>();
-        AdRequestType adRequestType;
-        AdResponseType adResponseType;
 
         span.setAttribute("app.ads.contextKeys", req.getContextKeysList().toString());
         span.setAttribute("app.ads.contextKeys.count", req.getContextKeysCount());
@@ -156,12 +165,10 @@ public final class AdService {
             Collection<Ad> ads = service.getAdsByCategory(req.getContextKeys(i));
             allAds.addAll(ads);
           }
-          adRequestType = AdRequestType.TARGETED;
           adResponseType = AdResponseType.TARGETED;
         } else {
           logger.info("Non-targeted ad request received, preparing random response.");
           allAds = service.getRandomAds();
-          adRequestType = AdRequestType.NOT_TARGETED;
           adResponseType = AdResponseType.RANDOM;
         }
         if (allAds.isEmpty()) {
@@ -173,11 +180,6 @@ public final class AdService {
         span.setAttribute("app.ads.ad_request_type", adRequestType.name());
         span.setAttribute("app.ads.ad_response_type", adResponseType.name());
 
-        adRequestsCounter.add(
-            1,
-            Attributes.of(
-                adRequestTypeKey, adRequestType.name(), adResponseTypeKey, adResponseType.name()));
-
         logger.debug("checking adServiceFailure feature flag");
         if (checkAdFailure()) {
           logger.warn(ADSERVICE_FAIL_FEATURE_FLAG + " fail feature flag enabled, failing request.");
@@ -187,14 +189,49 @@ public final class AdService {
         AdResponse reply = AdResponse.newBuilder().addAllAds(allAds).build();
         responseObserver.onNext(reply);
         responseObserver.onCompleted();
+        recordAdRequest(adRequestType, adResponseType, OUTCOME_SUCCESS);
         logger.debug("getAds request completed");
       } catch (StatusRuntimeException e) {
-        span.addEvent(
-            "Error", Attributes.of(AttributeKey.stringKey("exception.message"), e.getMessage()));
-        span.setStatus(StatusCode.ERROR);
+        String statusCode = e.getStatus().getCode().name();
+        recordFailure(span, e, statusCode);
+        recordAdRequest(adRequestType, adResponseType, OUTCOME_ERROR);
         logger.log(Level.WARN, "GetAds Failed with status {}", e.getStatus());
         responseObserver.onError(e);
+      } catch (RuntimeException e) {
+        // Without this branch an unexpected exception escapes getAds entirely: the span keeps an
+        // UNSET status, no exception is recorded, and the caller never gets a response - it only
+        // sees its own deadline expire.
+        recordFailure(span, e, Status.Code.INTERNAL.name());
+        recordAdRequest(adRequestType, adResponseType, OUTCOME_ERROR);
+        logger.log(Level.ERROR, "GetAds failed unexpectedly", e);
+        responseObserver.onError(
+            Status.INTERNAL.withDescription(e.getMessage()).withCause(e).asRuntimeException());
       }
+    }
+
+    /**
+     * Records the failure on the span so that the reason is readable from the trace alone: a
+     * semantic-convention {@code exception} event (carrying {@code exception.type}, {@code
+     * exception.message} and the stack trace) plus an error status whose description names the gRPC
+     * status code.
+     */
+    private void recordFailure(Span span, Throwable t, String statusCode) {
+      span.recordException(t);
+      span.setStatus(StatusCode.ERROR, statusCode);
+      span.setAttribute(rpcStatusCodeKey, statusCode);
+    }
+
+    private void recordAdRequest(
+        AdRequestType adRequestType, AdResponseType adResponseType, String outcome) {
+      adRequestsCounter.add(
+          1,
+          Attributes.of(
+              adRequestTypeKey,
+              adRequestType.name(),
+              adResponseTypeKey,
+              adResponseType.name(),
+              outcomeKey,
+              outcome));
     }
 
     boolean checkAdFailure() {
