@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [otelcollector] set explicit batch processor limits to bound export size
+  ([#126](https://github.com/javier-dash0/opentelemetry-demo/pull/126))
 * [checkoutservice] add producer interceptor for tracing
   ([#1400](https://github.com/open-telemetry/opentelemetry-demo/pull/1400))
 * [chore] increase memory for Collector and Jaeger
