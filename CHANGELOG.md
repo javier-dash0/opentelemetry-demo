@@ -7,6 +7,8 @@ the release.
 
 ## Unreleased
 
+* [otelcollector] add memory_limiter processor to all pipelines
+  ([#124](https://github.com/javier-dash0/opentelemetry-demo/pull/124))
 * [checkoutservice] add producer interceptor for tracing
   ([#1400](https://github.com/open-telemetry/opentelemetry-demo/pull/1400))
 * [chore] increase memory for Collector and Jaeger
