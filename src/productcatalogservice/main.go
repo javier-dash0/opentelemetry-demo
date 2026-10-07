@@ -305,7 +305,9 @@ func (p *productCatalog) GetProduct(ctx context.Context, req *pb.GetProductReque
 
 	if found == nil {
 		msg := fmt.Sprintf("Product Id Not Found: %s", req.Id)
-		span.SetStatus(otelcodes.Error, msg)
+		// NotFound is a client error (gRPC status 5): per the OpenTelemetry gRPC
+		// semantic conventions, a SERVER span must stay UNSET for it. Marking it
+		// ERROR inflates the service error rate with caller mistakes.
 		span.AddEvent(msg)
 		log.WithContext(ctx).Error("Product Not Found")
 		return nil, status.Errorf(codes.NotFound, msg)
