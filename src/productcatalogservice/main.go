@@ -345,6 +345,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		span.AddEvent("error", trace.WithAttributes(attribute.String("message", "Feature Flag Connection Failed")))
+		log.WithContext(ctx).WithError(err).WithField("feature_flag_service_addr", p.featureFlagSvcAddr).Error("Feature Flag Connection Failed")
 		return false
 	}
 	defer conn.Close()
@@ -356,6 +357,7 @@ func (p *productCatalog) checkProductFailure(ctx context.Context, id string) boo
 	if err != nil {
 		span := trace.SpanFromContext(ctx)
 		span.AddEvent("error", trace.WithAttributes(attribute.String("message", fmt.Sprintf("EvaluateProbabilityFeatureFlag Failed: %s", flagName))))
+		log.WithContext(ctx).WithError(err).WithField("feature_flag_name", flagName).Error("EvaluateProbabilityFeatureFlag Failed")
 		return false
 	}
 
