@@ -60,6 +60,13 @@ func (g *groupHandler) ConsumeClaim(session sarama.ConsumerGroupSession, claim s
 			orderResult := pb.OrderResult{}
 			err := proto.Unmarshal(message.Value, &orderResult)
 			if err != nil {
+				g.log.WithFields(logrus.Fields{
+					"messageTopic":     message.Topic,
+					"messagePartition": message.Partition,
+					"messageOffset":    message.Offset,
+					"messageTimestamp": message.Timestamp,
+					"messageSize":      len(message.Value),
+				}).WithError(err).Error("Failed to unmarshal order message")
 				return err
 			}
 

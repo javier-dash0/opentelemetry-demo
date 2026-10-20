@@ -281,7 +281,16 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 	shippingTrackingAttribute := attribute.String("app.shipping.tracking.id", shippingTrackingID)
 	span.AddEvent("shipped", trace.WithAttributes(shippingTrackingAttribute))
 
-	_ = cs.emptyUserCart(ctx, req.UserId)
+	if err := cs.emptyUserCart(ctx, req.UserId); err != nil {
+		log.WithError(err).WithFields(logrus.Fields{
+			"order_id": orderID.String(),
+			"user_id":  req.UserId,
+		}).Error("Failed to empty user cart after order")
+		span.AddEvent("cart_empty_failed", trace.WithAttributes(
+			attribute.String("app.order.id", orderID.String()),
+			attribute.String("error.message", err.Error()),
+		))
+	}
 
 	orderResult := &pb.OrderResult{
 		OrderId:            orderID.String(),
