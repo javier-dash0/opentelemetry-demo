@@ -67,7 +67,9 @@ async function simulateSlowness(span) {
 }
 
 async function closeGracefully(signal) {
-  featureFlagServiceClient.close()
+  if (featureFlagServiceClient) {
+    featureFlagServiceClient.close()
+  }
   server.forceShutdown()
   process.kill(process.pid, signal)
 }
