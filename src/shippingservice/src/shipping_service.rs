@@ -84,7 +84,10 @@ impl ShippingService for ShippingServer {
         span.set_attribute(semcov::trace::RPC_SYSTEM.string(RPC_SYSTEM_GRPC));
 
         span.add_event("Processing get quote request".to_string(), vec![]);
-        span.set_attribute(KeyValue::new("app.shipping.zip_code", request_message.address.unwrap().zip_code));
+        if let Some(address) = request_message.address.as_ref() {
+            let zip_code = address.zip_code.clone();
+            span.set_attribute(KeyValue::new("app.shipping.zip_code", zip_code));
+        }
 
         let cx = Context::current_with_span(span);
         let q = match create_quote_from_count(itemct)
@@ -164,8 +167,17 @@ impl ShippingServer {
         );
 
 
-        let response: Response<RangeFeatureFlagResponse> =
-            client.get_range_feature_flag(request).await.unwrap();
+        let feature_flag_result = client.get_range_feature_flag(request).await;
+        let response: Response<RangeFeatureFlagResponse> = match feature_flag_result {
+            Ok(response) => response,
+            Err(status) => {
+                warn!(
+                    "Feature flag service call failed, simulated slowness will not be applied: {}",
+                    status
+                );
+                return;
+            }
+        };
         let range_response: RangeFeatureFlagResponse = response.into_inner();
         if range_response.enabled {
             let minimum_delay = range_response.lower_bound.floor();
@@ -184,8 +196,9 @@ mod tests {
         shop::shipping_service_server::ShippingService,
         shop::{Address, GetQuoteRequest},
         shop::{CartItem, ShipOrderRequest},
-        ShippingServer, NANOS_MULTIPLE,
+        FeatureFlagServiceClient, ShippingServer, NANOS_MULTIPLE,
     };
+    use tonic::transport::Channel;
     use tonic::Request;
     use uuid::Uuid;
 
@@ -256,6 +269,23 @@ mod tests {
                 assert_eq!(money.nanos, 97 * NANOS_MULTIPLE);
             }
             Err(e) => panic!("error when making quote request for many values: {}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn ship_order_serves_when_feature_flag_service_is_unreachable() {
+        // 127.0.0.1:1 refuses connections, so the feature flag call returns an error
+        let channel = Channel::from_static("http://127.0.0.1:1").connect_lazy();
+        let server = ShippingServer::new(Some(FeatureFlagServiceClient::new(channel)));
+
+        match server
+            .ship_order(Request::new(ShipOrderRequest::default()))
+            .await
+        {
+            Ok(resp) => {
+                assert!(Uuid::parse_str(&resp.into_inner().tracking_id).is_ok());
+            }
+            Err(e) => panic!("error when the feature flag service is unreachable: {}", e),
         }
     }
 
