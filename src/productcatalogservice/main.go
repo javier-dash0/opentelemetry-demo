@@ -121,12 +121,14 @@ func initLogProvider() *sdklog.LoggerProvider {
 		log.WithContext(ctx).Fatalf("new otlp log grpc exporter failed: %v", err)
 	}
 
-	loggerProvider := sdklog.NewLoggerProvider(
-		sdklog.WithProcessor(sdklog.NewBatchProcessor(logExporter)),
-		sdklog.WithResource(resource),
-	)
+	return newLogProvider(sdklog.NewBatchProcessor(logExporter))
+}
 
-	return loggerProvider
+func newLogProvider(processor sdklog.Processor) *sdklog.LoggerProvider {
+	return sdklog.NewLoggerProvider(
+		sdklog.WithProcessor(processor),
+		sdklog.WithResource(initResource()),
+	)
 }
 
 func main() {
