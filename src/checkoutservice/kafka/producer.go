@@ -24,11 +24,9 @@ func CreateKafkaProducer(brokers []string, log *logrus.Logger) (sarama.AsyncProd
 		return nil, err
 	}
 
-	// We will log to STDOUT if we're not able to produce messages.
-	go func() {
-		for err := range producer.Errors() {
-			log.Errorf("Failed to write message: %+v", err)
-		}
-	}()
+	// The caller reads both Successes() and Errors() for each message it sends
+	// (see sendToPostProcessor). Draining Errors() here as well races with that
+	// read, so a failed produce could be logged here and never returned to the
+	// sender, which then waits forever.
 	return producer, nil
 }

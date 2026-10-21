@@ -310,7 +310,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 
 	// send to kafka only if kafka broker address is set
 	if cs.kafkaBrokerSvcAddr != "" {
-		cs.sendToPostProcessor(orderResult)
+		cs.sendToPostProcessor(ctx, orderResult)
 	}
 
 	resp := &pb.PlaceOrderResponse{Order: orderResult}
@@ -473,7 +473,7 @@ func (cs *checkoutService) shipOrder(ctx context.Context, address *pb.Address, i
 	return resp.GetTrackingId(), nil
 }
 
-func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
+func (cs *checkoutService) sendToPostProcessor(ctx context.Context, result *pb.OrderResult) {
 	message, err := proto.Marshal(result)
 	if err != nil {
 		log.Errorf("Failed to marshal message to protobuf: %+v", err)
@@ -485,7 +485,21 @@ func (cs *checkoutService) sendToPostProcessor(result *pb.OrderResult) {
 		Value: sarama.ByteEncoder(message),
 	}
 
-	cs.KafkaProducerClient.Input() <- &msg
-	successMsg := <-cs.KafkaProducerClient.Successes()
-	log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+	select {
+	case cs.KafkaProducerClient.Input() <- &msg:
+	case <-ctx.Done():
+		log.Warnf("Context canceled before sending message to post processor: %v", ctx.Err())
+		return
+	}
+
+	// Wait for the produce result. A failed produce is delivered on Errors(),
+	// not Successes(), so reading only Successes() blocks forever.
+	select {
+	case successMsg := <-cs.KafkaProducerClient.Successes():
+		log.Infof("Successful to write message. offset: %v", successMsg.Offset)
+	case errMsg := <-cs.KafkaProducerClient.Errors():
+		log.Errorf("Failed to write message: %v", errMsg.Err)
+	case <-ctx.Done():
+		log.Warnf("Context canceled before post processor result received: %v", ctx.Err())
+	}
 }
