@@ -33,12 +33,25 @@ func StartConsumerGroup(ctx context.Context, brokers []string, log *logrus.Logge
 		log: log,
 	}
 
-	err = consumerGroup.Consume(ctx, []string{Topic}, &handler)
-	if err != nil {
+	if err := consume(ctx, consumerGroup, &handler); err != nil {
 		return nil, err
 	}
 
 	return consumerGroup, nil
+}
+
+// consume calls Consume in a loop. A server-side rebalance or a session
+// timeout ends the current session, so the consumer must call Consume again to
+// rejoin the group and get the new claims.
+func consume(ctx context.Context, group sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler) error {
+	for {
+		if err := group.Consume(ctx, []string{Topic}, handler); err != nil {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
 }
 
 type groupHandler struct {
