@@ -8,5 +8,9 @@
 --     All values between set a percentage chance on each request
 --     example: 0.55 is enabled 55% of the time
 
--- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';
+-- Disable adServiceFailure feature flag to stop RESOURCE_EXHAUSTED errors on GetAds.
+-- This flag was enabled (probability > 0), causing ~31% of GetAds requests to fail
+-- with gRPC status RESOURCE_EXHAUSTED. See: https://runbooks.example.com/adservice-errors
+UPDATE public.featureflags SET enabled = 0 WHERE name = 'adServiceFailure';
 
+-- UPDATE public.featureflags SET enabled = 0.55 WHERE name = 'cartServiceFailure';

@@ -14,4 +14,4 @@ VALUES
     ('shippingServiceSimulateSlowness', 'Simulate slow response times in the shipping service', 0),
     ('shippingServiceSimulateSlownessLowerBound', 'Minimum simulated delay in milliseconds in shipping service, if enabled', 250),
     ('shippingServiceSimulateSlownessUpperBound', 'Maximum simulated delay in milliseconds in shipping service, if enabled', 400)
-    ON CONFLICT DO NOTHING;
+    ON CONFLICT (name) DO UPDATE SET enabled = 0;
