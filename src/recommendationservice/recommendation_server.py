@@ -124,7 +124,11 @@ def must_map_env(key: str):
 def check_feature_flag(flag_name: str):
     if feature_flag_stub is None:
         return False
-    return feature_flag_stub.EvaluateProbabilityFeatureFlag(demo_pb2.EvaluateProbabilityFeatureFlagRequest(name=flag_name)).enabled
+    try:
+        return feature_flag_stub.EvaluateProbabilityFeatureFlag(demo_pb2.EvaluateProbabilityFeatureFlagRequest(name=flag_name)).enabled
+    except grpc.RpcError as e:
+        logger.warning(f"Feature flag service call for {flag_name} failed, treating the flag as disabled: {e}")
+        return False
 
 
 if __name__ == "__main__":
