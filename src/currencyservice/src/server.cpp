@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <math.h>
+#include <stdexcept>
 #include <demo.grpc.pb.h>
 #include <grpc/health/v1/health.grpc.pb.h>
 
@@ -192,13 +193,21 @@ class CurrencyService final : public oteldemo::CurrencyService::Service
       // Do the conversion work
       Money from = request->from();
       string from_code = from.currency_code();
-      double rate = currency_conversion[from_code];
+      auto from_rate = currency_conversion.find(from_code);
+      if (from_rate == currency_conversion.end()) {
+        throw std::invalid_argument("unsupported currency code: " + from_code);
+      }
+      double rate = from_rate->second;
       double one_euro = getDouble(from) / rate ;
 
       string to_code = request->to_code();
-      double to_rate = currency_conversion[to_code];
+      auto to_rate = currency_conversion.find(to_code);
+      if (to_rate == currency_conversion.end()) {
+        throw std::invalid_argument("unsupported currency code: " + to_code);
+      }
+      double to_rate_value = to_rate->second;
 
-      double final = one_euro * to_rate;
+      double final = one_euro * to_rate_value;
       getUnitsAndNanos(*response, final);
       response->set_currency_code(to_code);
 
