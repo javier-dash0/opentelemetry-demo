@@ -202,12 +202,21 @@ public final class AdService {
         return false;
       }
 
-      EvaluateProbabilityFeatureFlagResponse response =
-          featureFlagServiceStub.evaluateProbabilityFeatureFlag(
-              EvaluateProbabilityFeatureFlagRequest.newBuilder()
-                  .setName(ADSERVICE_FAIL_FEATURE_FLAG)
-                  .build());
-      return response.getEnabled();
+      try {
+        EvaluateProbabilityFeatureFlagResponse response =
+            featureFlagServiceStub.evaluateProbabilityFeatureFlag(
+                EvaluateProbabilityFeatureFlagRequest.newBuilder()
+                    .setName(ADSERVICE_FAIL_FEATURE_FLAG)
+                    .build());
+        return response.getEnabled();
+      } catch (StatusRuntimeException e) {
+        logger.log(
+            Level.WARN,
+            "Feature flag service call for {} failed, treating the flag as disabled",
+            ADSERVICE_FAIL_FEATURE_FLAG,
+            e);
+        return false;
+      }
     }
   }
 
