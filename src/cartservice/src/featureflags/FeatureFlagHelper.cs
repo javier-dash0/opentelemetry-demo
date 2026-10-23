@@ -1,7 +1,9 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 using System;
+using System.Diagnostics;
 using System.Threading.Tasks;
+using Grpc.Core;
 using Oteldemo;
 
 namespace cartservice.featureflags;
@@ -32,7 +34,15 @@ public class FeatureFlagHelper
         }
 
         var featureFlagRequest = new EvaluateProbabilityFeatureFlagRequest { Name = "cartServiceFailure" };
-        var featureFlagResponse = await _featureFlagServiceClient.EvaluateProbabilityFeatureFlagAsync(featureFlagRequest);
-        return featureFlagResponse.Enabled;
+        try
+        {
+            var featureFlagResponse = await _featureFlagServiceClient.EvaluateProbabilityFeatureFlagAsync(featureFlagRequest);
+            return featureFlagResponse.Enabled;
+        }
+        catch (RpcException ex)
+        {
+            Activity.Current?.AddEvent(new ActivityEvent("error", tags: new ActivityTagsCollection { { "message", $"Feature Flag Service call failed: {ex.StatusCode}" } }));
+            return false;
+        }
     }
 }
