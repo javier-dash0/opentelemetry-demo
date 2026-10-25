@@ -145,14 +145,7 @@ class CurrencyService final : public oteldemo::CurrencyService::Service
     auto units = money.units();
     auto nanos = money.nanos();
 
-    double decimal = 0.0;
-    while (nanos != 0) {
-      double t = (double)(nanos%10)/10;
-      nanos = nanos/10;
-      decimal = decimal/10 + t;
-    }
-
-    return double(units) + decimal;
+    return double(units) + double(nanos) / 1000000000;
   }
 
   void getUnitsAndNanos(Money& money, double value) {
