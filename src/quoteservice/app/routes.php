@@ -26,7 +26,7 @@ function calculateQuote($jsonObject): float
             throw new \InvalidArgumentException('numberOfItems not provided');
         }
         $numberOfItems = intval($jsonObject['numberOfItems']);
-        $quote = round(8.90 * $numberOfItems, 2);
+        $quote = round(8.99 * $numberOfItems, 2);
 
         $childSpan->setAttribute('app.quote.items.count', $numberOfItems);
         $childSpan->setAttribute('app.quote.cost.total', $quote);
