@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -291,8 +290,8 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 		Items:              prep.orderItems,
 	}
 
-	shippingCostFloat, _ := strconv.ParseFloat(fmt.Sprintf("%d.%02d", prep.shippingCostLocalized.GetUnits(), prep.shippingCostLocalized.GetNanos()/1000000000), 64)
-	totalPriceFloat, _ := strconv.ParseFloat(fmt.Sprintf("%d.%02d", total.GetUnits(), total.GetNanos()/1000000000), 64)
+	shippingCostFloat := moneyToFloat(prep.shippingCostLocalized)
+	totalPriceFloat := moneyToFloat(total)
 
 	span.SetAttributes(
 		attribute.String("app.order.id", orderID.String()),
@@ -354,7 +353,7 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	for _, ci := range cartItems {
 		totalCart += ci.Quantity
 	}
-	shippingCostFloat, _ := strconv.ParseFloat(fmt.Sprintf("%d.%02d", shippingPrice.GetUnits(), shippingPrice.GetNanos()/1000000000), 64)
+	shippingCostFloat := moneyToFloat(shippingPrice)
 
 	span.SetAttributes(
 		attribute.Float64("app.shipping.amount", shippingCostFloat),
@@ -362,6 +361,13 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 		attribute.Int("app.order.items.count", len(orderItems)),
 	)
 	return out, nil
+}
+
+// moneyToFloat converts a Money value to a float64 amount in major currency
+// units, for example $36.55 becomes 36.55. The nanos field holds 10^-9 units,
+// so the whole units plus nanos/1e9 is the amount.
+func moneyToFloat(m *pb.Money) float64 {
+	return float64(m.GetUnits()) + float64(m.GetNanos())/1e9
 }
 
 func mustCreateClient(ctx context.Context, svcAddr string) *grpc.ClientConn {
