@@ -33,12 +33,24 @@ func StartConsumerGroup(ctx context.Context, brokers []string, log *logrus.Logge
 		log: log,
 	}
 
-	err = consumerGroup.Consume(ctx, []string{Topic}, &handler)
-	if err != nil {
+	if err := consumeSessions(ctx, consumerGroup, &handler, Topic); err != nil {
 		return nil, err
 	}
 
 	return consumerGroup, nil
+}
+
+// consumeSessions joins the consumer group for as long as the context is live.
+// ConsumerGroup.Consume returns every time a session ends, for example after a
+// rebalance, so it must be called again to get the new claims.
+func consumeSessions(ctx context.Context, group sarama.ConsumerGroup, handler sarama.ConsumerGroupHandler, topics ...string) error {
+	for ctx.Err() == nil {
+		if err := group.Consume(ctx, topics, handler); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type groupHandler struct {
