@@ -121,10 +121,21 @@ def must_map_env(key: str):
     return value
 
 
+FEATURE_FLAG_TIMEOUT_SECONDS = 1
+
+
 def check_feature_flag(flag_name: str):
     if feature_flag_stub is None:
         return False
-    return feature_flag_stub.EvaluateProbabilityFeatureFlag(demo_pb2.EvaluateProbabilityFeatureFlagRequest(name=flag_name)).enabled
+    try:
+        response = feature_flag_stub.EvaluateProbabilityFeatureFlag(
+            demo_pb2.EvaluateProbabilityFeatureFlagRequest(name=flag_name),
+            timeout=FEATURE_FLAG_TIMEOUT_SECONDS,
+        )
+        return response.enabled
+    except grpc.RpcError as err:
+        logger.warning(f'Feature flag evaluation failed for {flag_name}, treating the flag as disabled: {err}')
+        return False
 
 
 if __name__ == "__main__":
