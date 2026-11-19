@@ -45,7 +45,7 @@ namespace nostd       = opentelemetry::nostd;
 
 namespace
 {
-  std::unordered_map<std::string, double> currency_conversion
+  const std::unordered_map<std::string, double> currency_conversion
   {
     {"EUR", 1.0},
     {"USD", 1.1305},
@@ -192,18 +192,31 @@ class CurrencyService final : public oteldemo::CurrencyService::Service
       // Do the conversion work
       Money from = request->from();
       string from_code = from.currency_code();
-      double rate = currency_conversion[from_code];
-      double one_euro = getDouble(from) / rate ;
-
       string to_code = request->to_code();
-      double to_rate = currency_conversion[to_code];
-
-      double final = one_euro * to_rate;
-      getUnitsAndNanos(*response, final);
-      response->set_currency_code(to_code);
 
       span->SetAttribute("app.currency.conversion.from", from_code);
       span->SetAttribute("app.currency.conversion.to", to_code);
+
+      auto from_rate = currency_conversion.find(from_code);
+      auto to_rate = currency_conversion.find(to_code);
+      if (from_rate == currency_conversion.end() || to_rate == currency_conversion.end())
+      {
+        string unsupported_code = from_rate == currency_conversion.end() ? from_code : to_code;
+
+        span->AddEvent("Conversion failed");
+        span->SetStatus(StatusCode::kError);
+
+        logger->Error(std::string(__func__) + " unsupported currency code: " + unsupported_code);
+
+        span->End();
+        return Status(grpc::StatusCode::INVALID_ARGUMENT,
+                      "unsupported currency code: " + unsupported_code);
+      }
+
+      double one_euro = getDouble(from) / from_rate->second;
+      double final = one_euro * to_rate->second;
+      getUnitsAndNanos(*response, final);
+      response->set_currency_code(to_code);
 
       CurrencyCounter(to_code);
 
