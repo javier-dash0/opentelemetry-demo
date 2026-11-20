@@ -26,6 +26,12 @@ public class CartService : Oteldemo.CartService.CartServiceBase
 
     public override async Task<Empty> AddItem(AddItemRequest request, ServerCallContext context)
     {
+        if (request.Item is null || request.Item.Quantity < 1)
+        {
+            throw new RpcException(new Grpc.Core.Status(Grpc.Core.StatusCode.InvalidArgument,
+                "The item quantity must be at least 1."));
+        }
+
         var activity = Activity.Current;
         activity?.SetTag("app.user.id", request.UserId);
         activity?.SetTag("app.product.id", request.Item.ProductId);

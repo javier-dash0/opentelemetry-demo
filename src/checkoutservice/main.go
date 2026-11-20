@@ -262,7 +262,11 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 		Nanos: 0}
 	total = money.Must(money.Sum(total, prep.shippingCostLocalized))
 	for _, it := range prep.orderItems {
-		multPrice := money.MultiplySlow(it.Cost, uint32(it.GetItem().GetQuantity()))
+		var multPrice *pb.Money
+		multPrice, err = multiplyItemCost(it)
+		if err != nil {
+			return nil, status.Errorf(codes.FailedPrecondition, "%v", err)
+		}
 		total = money.Must(money.Sum(total, multPrice))
 	}
 
@@ -400,6 +404,15 @@ func (cs *checkoutService) emptyUserCart(ctx context.Context, userID string) err
 		return fmt.Errorf("failed to empty user cart during checkout: %+v", err)
 	}
 	return nil
+}
+
+func multiplyItemCost(item *pb.OrderItem) (*pb.Money, error) {
+	quantity := item.GetItem().GetQuantity()
+	if quantity < 1 {
+		return nil, fmt.Errorf("cart item %q has quantity %d, which is not a valid order quantity",
+			item.GetItem().GetProductId(), quantity)
+	}
+	return money.MultiplySlow(item.Cost, uint32(quantity)), nil
 }
 
 func (cs *checkoutService) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, error) {
