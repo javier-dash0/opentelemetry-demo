@@ -34,7 +34,11 @@ const handler: NextApiHandler<TResponse> = async ({ method, body, query }, res) 
     case 'POST': {
       const { userId, item } = body as AddItemRequest;
 
-      await CartGateway.addItem(userId, item!);
+      if (!item || !Number.isInteger(item.quantity) || item.quantity < 1) {
+        return res.status(400).json({ error: 'Item quantity must be a whole number of at least 1.' });
+      }
+
+      await CartGateway.addItem(userId, item);
       const cart = await CartGateway.getCart(userId);
 
       return res.status(200).json(cart);
